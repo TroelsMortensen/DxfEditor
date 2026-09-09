@@ -1,66 +1,82 @@
 ## App Overview & Goal
 
-- **Name Suggestion:** DxfLaserNester (or similar)
+- **Name:** Dxf Editor
 - **Purpose:**  
-    A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF ready for Lightburn.
+  A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF ready for Lightburn.
 - **Hosting:**  
-    Static deployment via GitHub Pages (Blazor WASM).
+  Static deployment via GitHub Pages (Blazor WASM). *(not yet configured)*
+- **Status:** Phases 1–3 complete. Core editor works: import, canvas viewport, select/move/rotate/mirror/delete. Layers, export, and GitHub Pages remain.
 
 ## Tech Stack
 
- - **Framework:** Blazor WebAssembly (.NET)
- - **DXF Processing:** netDxf NuGet package (runs entirely client-side in browser memory)
- - **UI / Styling:**  
-   Standard Blazor Razor components + a responsive HTML5 Canvas (`<canvas>`) wrapper for 2D rendering and manipulation
+- **Framework:** Blazor WebAssembly (.NET 10)
+- **DXF Processing:** netDxf (client-side). Uploads are buffered into a seekable `MemoryStream` (no filesystem paths). Pre-2000 ASCII DXFs (e.g. Fusion 360 R14 / AC1014) are header-upgraded to AC1015; if netDxf still fails, a legacy ASCII fallback parses common entities including `LWPOLYLINE`.
+- **UI / Styling:** Blazor Razor components + HTML5 `<canvas>` with a dedicated JS `requestAnimationFrame` handler (`wwwroot/js/dxfCanvas.js`). C# owns workspace state; JS owns smooth gesture redraw and commits transforms/selection back to Blazor.
 
 ## Architecture
-- Prefer small components over large ones, if possible.
-- Organize the components into logical folders, and use the same naming convention for the files as the components.
-- Prefer code-behind files instead of code blocks at the bottom of components.
-- Prefer local style sheets instead of global styles, when it makes sense.
+
+- Prefer small components over large ones.
+- Organize components into logical folders; match file names to component names.
+- Prefer code-behind (`.razor.cs`) over inline `@code` blocks.
+- Prefer local stylesheets (`.razor.css`) over global styles when it makes sense.
+- Current layout: `Models/`, `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`).
 
 ## UI layout
-- The UI is primarily the canvas, where the dxf files are displayed
-- There is a slim vertical sidebar on the left, which contain tools, initialy just a mirror tool. This tool just has the letter "M" on it initially, later I will swap it out with a custom icon.
-- There is a vertical sidebar on the right, which contains layer management, creating new layers is done here. Also in this bar is a selection panel, which shows all dxf files imported into the workspace. Selecting a dxf block in this panel will select and highlight it on the canvas.
-- There is a thin horizontal toolbar at the bottom, which shows buttons with the different layers (i.e. their colours) to assign a selected dxf part to a layer.
-- There is a thin horizontal toolbar at the top, which can manage export and potentially other options in the future.
+
+- **Canvas (center):** primary surface for DXF parts; drop target for `.dxf` files; pan/zoom/select/transform.
+- **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), delete. Icons live under `wwwroot/img/`.
+- **Right sidebar:** parts list of imported DXF files; selecting a row selects/highlights the part on the canvas. *(Layer management UI not built yet — Phase 4.)*
+- **Top bar:** app title only for now; export actions reserved for Phase 5.
+- **Bottom bar:** reserved for layer color assignment (Phase 4); not shown yet.
+- **Rotate handle:** selection chrome includes a rotate handle using `img/rotate.svg`.
 
 ## Features
-1. The user can drag and drop a dxf file onto the canvas to add it to the workspace.
-2. The user can drag and drop multiple dxf files onto the canvas to add them to the workspace in one go. They should be spread out evenly across the canvas.
-3. The user can drag a dxf block on the canvas to move it.
-4. There should be a handle to rotate a selection of elements
-5. The user can select pieces of dxf elements by clicking on them, it should be clear which element or elements are selected
-6. The user can hold shift to select multiple elements one by one
-7. The user can drag a box around elements to select them
-8. The user can mirror a selection of elements horizontally by clicking a button on the toolbar.
+
+| # | Feature | Status |
+|---|---------|--------|
+| 1 | Drag and drop a DXF onto the canvas | Done |
+| 2 | Multi-file drop; spread parts evenly | Done |
+| 3 | Drag a selected part (or multi-selection) to move | Done |
+| 4 | Rotate handle on selection | Done |
+| 5 | Click to select; clear selection chrome | Done |
+| 6 | Shift+click multi-select | Done |
+| 7 | Marquee (box) select | Done |
+| 8 | Mirror selection horizontally (toolbar) | Done |
+| 9 | Mirror selection vertically (toolbar) | Done |
+| 10 | Delete selection (toolbar + Delete/Backspace, with confirm) | Done |
+| 11 | Pan (middle-mouse / Space+drag) and wheel zoom | Done |
+| 12 | Parts list selection sync with canvas | Done |
+| 13 | Layer / color assignment | Not started (Phase 4) |
+| 14 | Bounding-box / sheet size readout | Not started (Phase 4) |
+| 15 | Master DXF export download | Not started (Phase 5) |
+| 16 | GitHub Pages deploy workflow | Not started (Phase 5) |
 
 ## Functional Requirements & Tasks (Phased Breakdown)
 
-**Phase 1: Project Initialization & File Ingestion**
-- Initialize Blazor WASM project and add the netDxf NuGet package.
-- Implement a file upload dropzone component supporting multiple `.dxf` file selections.
-- Parse uploaded byte streams into `DxfDocument` objects, automatically exploding any blocks into raw entities (lines, arcs, polylines).
+**Phase 1: Project Initialization & File Ingestion** — Done
+- Blazor WASM project + netDxf package.
+- Canvas dropzone for multiple `.dxf` files (JS `File` → base64 → C# `MemoryStream`).
+- Parse into geometry; explode inserts/blocks; normalize part origin to local bbox center.
+- R14 / pre-2000 ASCII support via header upgrade + legacy entity fallback.
 
-**Phase 2: The 2D Canvas Viewport & State Management**
-- Build a state container to track "PlacedParts" (position X/Y, rotation angle, mirror status, assigned layer/color).
-- Render imported parts onto an HTML5 Canvas using C# to JS interop or a Blazor-driven canvas loop.
-- Implement pan and zoom controls for the canvas workspace.
+**Phase 2: The 2D Canvas Viewport & State Management** — Done
+- `WorkspaceState` tracks placed parts (position, rotation, mirror) and selection.
+- JS-owned rAF canvas loop; Blazor pushes scene snapshots and receives commit callbacks.
+- Pan and zoom (wheel toward cursor).
 
-**Phase 3: Transformations (Move, Rotate, Mirror)**
-- Implement click-to-select logic for parts on the canvas or via a sidebar parts list.
-- Add transformation controls:
-    - Translate (drag-and-drop or precise numeric coordinate entry)
-    - Rotate (90-degree step buttons or custom angle)
-    - Mirror (horizontal/vertical flip)
+**Phase 3: Transformations (Move, Rotate, Mirror, Delete)** — Done
+- Click / shift-click / marquee select on canvas; parts list selection.
+- Translate by drag; free rotate via handle; horizontal and vertical mirror from left toolbar.
+- Delete selected parts via toolbar button or Delete/Backspace, with confirmation prompt.
+- *(Precise numeric coordinate entry not implemented — deferred.)*
 
-**Phase 4: Layer & Color Assignment**
-- Create a layer configuration panel (e.g., Default layers: Cut = Red, Edge = Blue).
-- Allow assigning selected parts to specific layers, ensuring entity colors are set to ByLayer so Lightburn picks them up instantly.
-- Add a bounding box calculator that displays the total dimensions of your nested sheet to help minimize material waste.
+**Phase 4: Layer & Color Assignment** — Not started
+- Layer configuration panel (e.g. Cut = Red, Edge = Blue) in the right sidebar.
+- Assign selected parts to layers; entity colors ByLayer for Lightburn.
+- Bottom toolbar of layer color buttons.
+- Bounding box / nested sheet dimensions readout.
 
-**Phase 5: Master DXF Export & GitHub Pages Deployment**
-- Combine all transformed parts into a single master `DxfDocument`.
-- Generate a client-side file download trigger for the resulting `.dxf` file.
-- Configure GitHub Actions workflow to automatically build and deploy the Blazor WASM output to GitHub Pages.
+**Phase 5: Master DXF Export & GitHub Pages Deployment** — Not started
+- Combine transformed parts into one master `DxfDocument`.
+- Client-side `.dxf` download.
+- GitHub Actions → GitHub Pages for the Blazor WASM publish output.
