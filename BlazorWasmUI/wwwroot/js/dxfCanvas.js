@@ -20,8 +20,13 @@ export function createCanvasController(canvas, dotNetRef) {
   };
 
   const HIT_PX = 6;
-  const HANDLE_OFFSET = 28;
-  const HANDLE_RADIUS = 7;
+  const HANDLE_OFFSET = 34;
+  const HANDLE_SIZE = 22;
+  const HANDLE_HIT = 14;
+
+  const rotateIcon = new Image();
+  rotateIcon.src = "img/rotate.svg";
+  rotateIcon.onload = () => invalidate();
 
   function invalidate() {
     state.dirty = true;
@@ -215,7 +220,7 @@ export function createCanvasController(canvas, dotNetRef) {
     const s = worldToScreen(h.x, h.y);
     const dx = screenX - s.x;
     const dy = screenY - s.y;
-    return dx * dx + dy * dy <= (HANDLE_RADIUS + 4) * (HANDLE_RADIUS + 4);
+    return dx * dx + dy * dy <= HANDLE_HIT * HANDLE_HIT;
   }
 
   function drawGrid() {
@@ -304,13 +309,19 @@ export function createCanvasController(canvas, dotNetRef) {
       ctx.lineTo(hs.x, hs.y);
       ctx.strokeStyle = "rgba(240,180,41,0.8)";
       ctx.stroke();
+
       ctx.beginPath();
-      ctx.arc(hs.x, hs.y, HANDLE_RADIUS, 0, Math.PI * 2);
+      ctx.arc(hs.x, hs.y, HANDLE_SIZE * 0.55, 0, Math.PI * 2);
       ctx.fillStyle = "#f0b429";
       ctx.fill();
       ctx.strokeStyle = "#1a1d23";
       ctx.lineWidth = 1.5;
       ctx.stroke();
+
+      if (rotateIcon.complete && rotateIcon.naturalWidth > 0) {
+        const size = HANDLE_SIZE;
+        ctx.drawImage(rotateIcon, hs.x - size * 0.5, hs.y - size * 0.5, size, size);
+      }
     }
     ctx.restore();
   }
