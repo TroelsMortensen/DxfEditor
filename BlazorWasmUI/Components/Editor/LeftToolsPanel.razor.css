@@ -31,6 +31,10 @@
     filter: brightness(0) invert(0.92);
 }
 
+.tool-icon--rotated {
+    transform: rotate(90deg);
+}
+
 .tool-btn:hover:not(:disabled) {
     background: #353c48;
     border-color: #f0b429;

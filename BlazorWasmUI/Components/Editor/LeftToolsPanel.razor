@@ -8,14 +8,21 @@
             class="tool-btn"
             title="Mirror selection horizontally"
             disabled="@(Workspace.SelectedIds.Count == 0)"
-            @onclick="Mirror">
+            @onclick="MirrorHorizontal">
         <img src="img/mirror-tool.svg" alt="" class="tool-icon" />
+    </button>
+    <button type="button"
+            class="tool-btn"
+            title="Mirror selection vertically"
+            disabled="@(Workspace.SelectedIds.Count == 0)"
+            @onclick="MirrorVertical">
+        <img src="img/mirror-tool.svg" alt="" class="tool-icon tool-icon--rotated" />
     </button>
     <button type="button"
             class="tool-btn"
             title="Delete selection (Delete)"
             disabled="@(Workspace.SelectedIds.Count == 0)"
             @onclick="DeleteAsync">
-        D
+        <img src="img/delete.svg" alt="" class="tool-icon" />
     </button>
 </aside>

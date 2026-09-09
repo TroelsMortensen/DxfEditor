@@ -140,6 +140,27 @@ public sealed class WorkspaceState
         Notify();
     }
 
+    public void MirrorSelectionVertical()
+    {
+        if (_selectedIds.Count == 0)
+        {
+            return;
+        }
+
+        var selected = _parts.Where(p => _selectedIds.Contains(p.Id)).ToList();
+        var centroid = GetSelectionCentroid(selected);
+
+        foreach (var part in selected)
+        {
+            // Reflect part origin about selection centroid in Y, then compose a vertical flip.
+            part.OffsetY = 2 * centroid.Y - part.OffsetY;
+            part.Mirrored = !part.Mirrored;
+            part.RotationDegrees = 180 - part.RotationDegrees;
+        }
+
+        Notify();
+    }
+
     public int DeleteSelection()
     {
         if (_selectedIds.Count == 0)

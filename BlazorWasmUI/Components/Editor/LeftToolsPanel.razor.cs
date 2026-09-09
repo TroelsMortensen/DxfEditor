@@ -16,7 +16,9 @@ public partial class LeftToolsPanel : IDisposable
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 
-    private void Mirror() => Workspace.MirrorSelectionHorizontal();
+    private void MirrorHorizontal() => Workspace.MirrorSelectionHorizontal();
+
+    private void MirrorVertical() => Workspace.MirrorSelectionVertical();
 
     private async Task DeleteAsync()
     {
