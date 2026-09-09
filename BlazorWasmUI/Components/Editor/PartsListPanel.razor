@@ -1,0 +1,28 @@
+@namespace BlazorWasmUI.Components.Editor
+@using BlazorWasmUI.Services
+@inject WorkspaceState Workspace
+@implements IDisposable
+
+<aside class="parts-panel">
+    <div class="parts-panel__title">Parts</div>
+    @if (Workspace.Parts.Count == 0)
+    {
+        <div class="parts-panel__empty">No parts imported</div>
+    }
+    else
+    {
+        <ul class="parts-panel__list">
+            @foreach (var part in Workspace.Parts)
+            {
+                var selected = Workspace.SelectedIds.Contains(part.Id);
+                <li>
+                    <button type="button"
+                            class="parts-panel__item @(selected ? "is-selected" : null)"
+                            @onclick="() => Select(part.Id)">
+                        @part.Name
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</aside>

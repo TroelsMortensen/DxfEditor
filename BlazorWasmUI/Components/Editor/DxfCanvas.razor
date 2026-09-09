@@ -1,0 +1,16 @@
+@namespace BlazorWasmUI.Components.Editor
+@using BlazorWasmUI.Models
+@using BlazorWasmUI.Services
+@inject IJSRuntime Js
+@inject WorkspaceState Workspace
+@inject DxfImportService ImportService
+@implements IAsyncDisposable
+
+<div class="dxf-canvas-host">
+    <canvas @ref="_canvas" class="dxf-canvas"></canvas>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Workspace.StatusMessage))
+{
+    <div class="dxf-status">@Workspace.StatusMessage</div>
+}

@@ -1,0 +1,28 @@
+.dxf-canvas-host {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.dxf-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: crosshair;
+    outline: none;
+}
+
+.dxf-status {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
+    background: rgba(20, 22, 28, 0.88);
+    color: #d7dde5;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 2;
+}

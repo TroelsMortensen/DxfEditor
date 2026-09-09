@@ -1,0 +1,21 @@
+@namespace BlazorWasmUI.Components.Editor
+@using BlazorWasmUI.Services
+@inject WorkspaceState Workspace
+@implements IDisposable
+
+<aside class="tools-panel">
+    <button type="button"
+            class="tool-btn"
+            title="Mirror selection horizontally"
+            disabled="@(Workspace.SelectedIds.Count == 0)"
+            @onclick="Mirror">
+        <img src="img/mirror-tool.svg" alt="" class="tool-icon" />
+    </button>
+    <button type="button"
+            class="tool-btn"
+            title="Delete selection (Delete)"
+            disabled="@(Workspace.SelectedIds.Count == 0)"
+            @onclick="DeleteAsync">
+        D
+    </button>
+</aside>
