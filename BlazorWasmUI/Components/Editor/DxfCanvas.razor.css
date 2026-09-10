@@ -13,6 +13,35 @@
     outline: none;
 }
 
+.dxf-canvas__info-btn {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 50px;
+    height: 50px;
+    padding: 0;
+    border: 1px solid #3a414d;
+    background: #2a303a;
+    border-radius: 4px;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.dxf-canvas__info-btn:hover {
+    background: #353c48;
+    border-color: #f0b429;
+}
+
+.dxf-canvas__info-icon {
+    width: 28px;
+    height: 28px;
+    filter: brightness(0) invert(0.92);
+}
+
 .dxf-status {
     position: absolute;
     left: 50%;

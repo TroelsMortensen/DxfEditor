@@ -774,6 +774,9 @@ export function createCanvasController(canvas, dotNetRef) {
     }
 
     if (e.key === "Escape") {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
+        return;
+      }
       if (hasSelection()) {
         state.selectedPartIds = new Set();
         state.selectedEntityIds = new Set();

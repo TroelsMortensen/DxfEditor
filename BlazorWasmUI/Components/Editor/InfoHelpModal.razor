@@ -1,0 +1,86 @@
+@namespace BlazorWasmUI.Components.Editor
+
+@if (IsOpen)
+{
+    <div class="info-modal"
+         role="presentation"
+         tabindex="-1"
+         @ref="_root"
+         @onclick="CloseAsync"
+         @onkeydown="OnDialogKeyDown">
+        <div class="info-modal__backdrop" aria-hidden="true"></div>
+        <div class="info-modal__dialog"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="info-modal-title"
+             @onclick:stopPropagation="true">
+            <header class="info-modal__header">
+                <h2 id="info-modal-title" class="info-modal__title">How to use</h2>
+                <button type="button"
+                        class="info-modal__close"
+                        title="Close"
+                        aria-label="Close"
+                        @onclick="CloseAsync">
+                    &times;
+                </button>
+            </header>
+            <div class="info-modal__body">
+                <section class="info-modal__section">
+                    <h3 class="info-modal__heading">Left toolbar</h3>
+                    <ul class="info-modal__list">
+                        <li><strong>Mirror horizontally</strong> — flips the selected part(s) left/right. Requires a selection.</li>
+                        <li><strong>Mirror vertically</strong> — flips the selected part(s) up/down. Requires a selection.</li>
+                        <li><strong>Delete</strong> — removes the selected part(s). You can also press Delete or Backspace. A confirmation prompt appears first.</li>
+                        <li><strong>Import</strong> — at the bottom of the rail; opens a file picker for one or more <code>.dxf</code> files.</li>
+                    </ul>
+                </section>
+
+                <section class="info-modal__section">
+                    <h3 class="info-modal__heading">Layers (right)</h3>
+                    <p>
+                        The Layers panel lists every layer in the workspace (color swatch and name).
+                        Under <strong>Add new layer to palette</strong>, click an unused color to add that layer.
+                        Colors already in use are disabled.
+                    </p>
+                </section>
+
+                <section class="info-modal__section">
+                    <h3 class="info-modal__heading">Parts list (right)</h3>
+                    <ul class="info-modal__list">
+                        <li><strong>Click</strong> a part name to select it on the canvas. If it is already the only selected part, click again to clear the selection.</li>
+                        <li><strong>Shift+click</strong> toggles that part in or out of a multi-selection.</li>
+                        <li>The list stays in sync with what you select on the canvas.</li>
+                    </ul>
+                </section>
+
+                <section class="info-modal__section">
+                    <h3 class="info-modal__heading">Layer bar (bottom)</h3>
+                    <p>
+                        The bottom color buttons assign the current selection to a layer.
+                        With whole blocks selected, every entity in those blocks gets the layer.
+                        With entities selected (Ctrl/Cmd+click on the canvas), only those entities are reassigned.
+                    </p>
+                    <ul class="info-modal__list">
+                        <li>The bar updates automatically when you import a DXF (source colors become layers).</li>
+                        <li>Layers you add in the Layers panel also appear here.</li>
+                        <li>Buttons are disabled when nothing is selected.</li>
+                    </ul>
+                </section>
+
+                <section class="info-modal__section">
+                    <h3 class="info-modal__heading">Canvas</h3>
+                    <ul class="info-modal__list">
+                        <li><strong>Import</strong> — drag and drop <code>.dxf</code> files onto the canvas (multiple files are fine).</li>
+                        <li><strong>Zoom</strong> — scroll the mouse wheel; zoom centers on the cursor.</li>
+                        <li><strong>Pan</strong> — middle-mouse drag, Space+left-drag, or Alt+left-drag.</li>
+                        <li><strong>Select a block</strong> — left-click a part.</li>
+                        <li><strong>Multi-select blocks</strong> — Shift+click additional parts, or drag an empty area to marquee-select. Shift+marquee adds to the current selection.</li>
+                        <li><strong>Select entities</strong> — hold Ctrl (or Cmd on Mac) and click to select individual lines/arcs/circles inside a block for layer and color assignment.</li>
+                        <li><strong>Move</strong> — drag a selection to reposition it. The rotate handle above the selection rotates the parent block(s).</li>
+                        <li><strong>Clear selection</strong> — click empty canvas or press Escape.</li>
+                    </ul>
+                </section>
+            </div>
+        </div>
+    </div>
+}

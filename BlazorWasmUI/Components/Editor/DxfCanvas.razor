@@ -10,7 +10,17 @@
     <canvas @ref="_canvas" class="dxf-canvas"></canvas>
 </div>
 
+<button type="button"
+        class="dxf-canvas__info-btn"
+        title="How to use"
+        aria-label="How to use"
+        @onclick="OpenInfo">
+    <img src="img/info.svg" alt="" class="dxf-canvas__info-icon" />
+</button>
+
 @if (!string.IsNullOrWhiteSpace(Workspace.StatusMessage))
 {
     <div class="dxf-status">@Workspace.StatusMessage</div>
 }
+
+<InfoHelpModal IsOpen="_infoOpen" OnClose="CloseInfo" />

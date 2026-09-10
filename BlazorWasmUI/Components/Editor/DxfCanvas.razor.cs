@@ -14,11 +14,16 @@ public partial class DxfCanvas
     private bool _initialized;
     private bool _pushing;
     private bool _pushQueued;
+    private bool _infoOpen;
 
     protected override void OnInitialized()
     {
         Workspace.Changed += OnWorkspaceChanged;
     }
+
+    private void OpenInfo() => _infoOpen = true;
+
+    private void CloseInfo() => _infoOpen = false;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
