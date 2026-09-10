@@ -46,7 +46,7 @@
 | 9 | Mirror selection vertically (toolbar) | Done |
 | 10 | Delete selection (toolbar + Delete/Backspace, with confirm) | Done |
 | 11 | Pan (middle-mouse / Space+drag, grabbing cursor) and wheel zoom | Done |
-| 12 | Parts list selection sync with canvas | Done |
+| 12 | Parts list selection sync with canvas (Ctrl/Cmd+click toggle; Shift+click range) | Done |
 | 13 | Layer / color assignment (per block or per entity) | Done |
 | 14 | Bounding-box / sheet size readout | Not started (Phase 4) |
 | 15 | Master DXF export download | Not started (Phase 5) |
@@ -68,7 +68,7 @@
 - Pan and zoom (wheel toward cursor).
 
 **Phase 3: Transformations (Move, Rotate, Mirror, Duplicate, Delete)** — Done
-- Click selects a DXF block; Shift+click / marquee multi-select blocks; parts list selection.
+- Click selects a DXF block; Shift+click / marquee multi-select blocks; parts list: Ctrl/Cmd+click toggles, Shift+click selects a contiguous range.
 - Ctrl+click selects individual entities (line/arc/circle/…) for layer assignment; Escape clears selection.
 - Move / rotate / mirror / duplicate / delete always apply to whole parent block(s), keeping each import cohesive.
 - Duplicate deep-copies selected blocks and adds uniquely named `(n)` entries to the Parts list. Toolbar offsets copies slightly; Ctrl/Cmd+D places the selection’s world bounding-box center at the mouse cursor.
