@@ -19,19 +19,7 @@ public static class DxfBatchImport
             var result = importService.ImportFromBytes(data, name);
             if (result.Success && result.Part is not null)
             {
-                Guid? dominantLayerId = null;
-                if (result.Layers.Count > 0)
-                {
-                    var ensured = workspace.EnsureLayers(
-                        result.Layers.Select(l => (l.Name, l.ColorHex)));
-                    dominantLayerId = ensured.Count > 0 ? ensured[0].Id : null;
-                }
-
-                if (dominantLayerId is Guid layerId)
-                {
-                    result.Part.LayerId = layerId;
-                }
-
+                AssignEntityLayers(workspace, result.Part, result.Layers);
                 imported.Add(result.Part);
                 if (result.Warnings.Count > 0)
                 {
@@ -58,6 +46,57 @@ public static class DxfBatchImport
         else if (errors.Count > 0)
         {
             workspace.SetStatus(errors[0]);
+        }
+    }
+
+    private static void AssignEntityLayers(
+        WorkspaceState workspace,
+        PlacedPart part,
+        IReadOnlyList<ImportedLayerInfo> importedLayers)
+    {
+        var ensureList = new List<(string Name, string ColorHex)>();
+        if (importedLayers.Count > 0)
+        {
+            ensureList.AddRange(importedLayers.Select(l => (l.Name, l.ColorHex)));
+        }
+
+        foreach (var entity in part.Entities)
+        {
+            if (string.IsNullOrWhiteSpace(entity.SourceColorHex))
+            {
+                continue;
+            }
+
+            var hex = LayerPalette.NormalizeHex(entity.SourceColorHex);
+            if (ensureList.All(l =>
+                    !string.Equals(LayerPalette.NormalizeHex(l.ColorHex), hex, StringComparison.OrdinalIgnoreCase)))
+            {
+                ensureList.Add(("Layer", hex));
+            }
+        }
+
+        if (ensureList.Count > 0)
+        {
+            workspace.EnsureLayers(ensureList);
+        }
+
+        var byHex = workspace.Layers.ToDictionary(
+            l => l.ColorHex,
+            l => l.Id,
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entity in part.Entities)
+        {
+            if (!string.IsNullOrWhiteSpace(entity.SourceColorHex))
+            {
+                var hex = LayerPalette.NormalizeHex(entity.SourceColorHex);
+                if (byHex.TryGetValue(hex, out var layerId))
+                {
+                    entity.LayerId = layerId;
+                }
+            }
+
+            entity.SourceColorHex = null;
         }
     }
 }

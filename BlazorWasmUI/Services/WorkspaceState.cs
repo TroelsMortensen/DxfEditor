@@ -8,12 +8,16 @@ public sealed class WorkspaceState
 
     private readonly List<PlacedPart> _parts = [];
     private readonly List<LayerDefinition> _layers = [];
-    private readonly HashSet<Guid> _selectedIds = [];
+    private readonly HashSet<Guid> _selectedPartIds = [];
+    private readonly HashSet<Guid> _selectedEntityIds = [];
     private int _nextLayerNumber = 1;
 
     public IReadOnlyList<PlacedPart> Parts => _parts;
     public IReadOnlyList<LayerDefinition> Layers => _layers;
-    public IReadOnlyCollection<Guid> SelectedIds => _selectedIds;
+    public IReadOnlyCollection<Guid> SelectedPartIds => _selectedPartIds;
+    public IReadOnlyCollection<Guid> SelectedEntityIds => _selectedEntityIds;
+
+    public bool HasSelection => _selectedPartIds.Count > 0 || _selectedEntityIds.Count > 0;
 
     public double PanX { get; private set; }
     public double PanY { get; private set; }
@@ -107,19 +111,41 @@ public sealed class WorkspaceState
         return layer;
     }
 
+    public IReadOnlyList<PartEntity> GetLayerAssignmentTargets()
+    {
+        if (_selectedPartIds.Count > 0)
+        {
+            return _parts
+                .Where(p => _selectedPartIds.Contains(p.Id))
+                .SelectMany(p => p.Entities)
+                .ToList();
+        }
+
+        if (_selectedEntityIds.Count == 0)
+        {
+            return [];
+        }
+
+        return _parts
+            .SelectMany(p => p.Entities)
+            .Where(e => _selectedEntityIds.Contains(e.Id))
+            .ToList();
+    }
+
     public void AssignSelectionToLayer(Guid layerId)
     {
-        if (_selectedIds.Count == 0 || _layers.All(l => l.Id != layerId))
+        if (!HasSelection || _layers.All(l => l.Id != layerId))
         {
             return;
         }
 
+        var targets = GetLayerAssignmentTargets();
         var changed = false;
-        foreach (var part in _parts.Where(p => _selectedIds.Contains(p.Id)))
+        foreach (var entity in targets)
         {
-            if (part.LayerId != layerId)
+            if (entity.LayerId != layerId)
             {
-                part.LayerId = layerId;
+                entity.LayerId = layerId;
                 changed = true;
             }
         }
@@ -149,34 +175,113 @@ public sealed class WorkspaceState
 
     private string NextAutoLayerName() => $"Layer {_nextLayerNumber++}";
 
-    public void SetSelection(IEnumerable<Guid> ids, bool clearExisting = true)
+    public IReadOnlyList<PlacedPart> GetEditableParts()
+    {
+        if (_selectedPartIds.Count > 0)
+        {
+            return _parts.Where(p => _selectedPartIds.Contains(p.Id)).ToList();
+        }
+
+        if (_selectedEntityIds.Count == 0)
+        {
+            return [];
+        }
+
+        return _parts
+            .Where(p => p.Entities.Any(e => _selectedEntityIds.Contains(e.Id)))
+            .ToList();
+    }
+
+    public void ClearSelection()
+    {
+        if (_selectedPartIds.Count == 0 && _selectedEntityIds.Count == 0)
+        {
+            return;
+        }
+
+        _selectedPartIds.Clear();
+        _selectedEntityIds.Clear();
+        Notify();
+    }
+
+    public void SetPartSelection(IEnumerable<Guid> ids, bool clearExisting = true)
     {
         if (clearExisting)
         {
-            _selectedIds.Clear();
+            _selectedPartIds.Clear();
+            _selectedEntityIds.Clear();
         }
 
         foreach (var id in ids)
         {
             if (_parts.Any(p => p.Id == id))
             {
-                _selectedIds.Add(id);
+                _selectedPartIds.Add(id);
             }
+        }
+
+        if (_selectedPartIds.Count > 0)
+        {
+            _selectedEntityIds.Clear();
         }
 
         Notify();
     }
 
-    public void ToggleSelection(Guid id)
+    public void SetEntitySelection(IEnumerable<Guid> ids, bool clearExisting = true)
     {
-        if (!_parts.Any(p => p.Id == id))
+        if (clearExisting)
         {
-            return;
+            _selectedPartIds.Clear();
+            _selectedEntityIds.Clear();
         }
 
-        if (!_selectedIds.Add(id))
+        var known = _parts.SelectMany(p => p.Entities.Select(e => e.Id)).ToHashSet();
+        foreach (var id in ids)
         {
-            _selectedIds.Remove(id);
+            if (known.Contains(id))
+            {
+                _selectedEntityIds.Add(id);
+            }
+        }
+
+        if (_selectedEntityIds.Count > 0)
+        {
+            _selectedPartIds.Clear();
+        }
+
+        Notify();
+    }
+
+    public void SetSelection(IEnumerable<Guid> partIds, IEnumerable<Guid> entityIds)
+    {
+        _selectedPartIds.Clear();
+        _selectedEntityIds.Clear();
+
+        var partIdList = partIds.ToList();
+        var entityIdList = entityIds.ToList();
+
+        // Prefer part selection when both are sent (mutual exclusion).
+        if (partIdList.Count > 0)
+        {
+            foreach (var id in partIdList)
+            {
+                if (_parts.Any(p => p.Id == id))
+                {
+                    _selectedPartIds.Add(id);
+                }
+            }
+        }
+        else
+        {
+            var known = _parts.SelectMany(p => p.Entities.Select(e => e.Id)).ToHashSet();
+            foreach (var id in entityIdList)
+            {
+                if (known.Contains(id))
+                {
+                    _selectedEntityIds.Add(id);
+                }
+            }
         }
 
         Notify();
@@ -184,10 +289,11 @@ public sealed class WorkspaceState
 
     public void SelectOnly(Guid id)
     {
-        _selectedIds.Clear();
+        _selectedPartIds.Clear();
+        _selectedEntityIds.Clear();
         if (_parts.Any(p => p.Id == id))
         {
-            _selectedIds.Add(id);
+            _selectedPartIds.Add(id);
         }
 
         Notify();
@@ -229,17 +335,16 @@ public sealed class WorkspaceState
 
     public void MirrorSelectionHorizontal()
     {
-        if (_selectedIds.Count == 0)
+        var selected = GetEditableParts();
+        if (selected.Count == 0)
         {
             return;
         }
 
-        var selected = _parts.Where(p => _selectedIds.Contains(p.Id)).ToList();
         var centroid = GetSelectionCentroid(selected);
 
         foreach (var part in selected)
         {
-            // Reflect part origin about selection centroid in X, then flip local mirror flag.
             part.OffsetX = 2 * centroid.X - part.OffsetX;
             part.Mirrored = !part.Mirrored;
             part.RotationDegrees = -part.RotationDegrees;
@@ -250,17 +355,16 @@ public sealed class WorkspaceState
 
     public void MirrorSelectionVertical()
     {
-        if (_selectedIds.Count == 0)
+        var selected = GetEditableParts();
+        if (selected.Count == 0)
         {
             return;
         }
 
-        var selected = _parts.Where(p => _selectedIds.Contains(p.Id)).ToList();
         var centroid = GetSelectionCentroid(selected);
 
         foreach (var part in selected)
         {
-            // Reflect part origin about selection centroid in Y, then compose a vertical flip.
             part.OffsetY = 2 * centroid.Y - part.OffsetY;
             part.Mirrored = !part.Mirrored;
             part.RotationDegrees = 180 - part.RotationDegrees;
@@ -271,13 +375,16 @@ public sealed class WorkspaceState
 
     public int DeleteSelection()
     {
-        if (_selectedIds.Count == 0)
+        var selected = GetEditableParts();
+        if (selected.Count == 0)
         {
             return 0;
         }
 
-        var removed = _parts.RemoveAll(p => _selectedIds.Contains(p.Id));
-        _selectedIds.Clear();
+        var removeIds = selected.Select(p => p.Id).ToHashSet();
+        var removed = _parts.RemoveAll(p => removeIds.Contains(p.Id));
+        _selectedPartIds.Clear();
+        _selectedEntityIds.Clear();
         if (removed > 0)
         {
             StatusMessage = removed == 1 ? "Deleted 1 part." : $"Deleted {removed} parts.";
@@ -291,7 +398,8 @@ public sealed class WorkspaceState
     {
         var scene = new SceneDto
         {
-            SelectedIds = _selectedIds.Select(id => id.ToString()).ToList(),
+            SelectedPartIds = _selectedPartIds.Select(id => id.ToString()).ToList(),
+            SelectedEntityIds = _selectedEntityIds.Select(id => id.ToString()).ToList(),
             Viewport = new ViewportDto
             {
                 PanX = PanX,
@@ -314,18 +422,22 @@ public sealed class WorkspaceState
                 LocalMinY = part.LocalBounds.MinY,
                 LocalMaxX = part.LocalBounds.MaxX,
                 LocalMaxY = part.LocalBounds.MaxY,
-                ColorHex = ResolvePartColor(part),
-                Polylines = part.LocalPolylines
-                    .Select(poly =>
+                Entities = part.Entities
+                    .Select(entity =>
                     {
-                        var flat = new double[poly.Count * 2];
-                        for (var i = 0; i < poly.Count; i++)
+                        var flat = new double[entity.Polyline.Count * 2];
+                        for (var i = 0; i < entity.Polyline.Count; i++)
                         {
-                            flat[i * 2] = poly[i].X;
-                            flat[i * 2 + 1] = poly[i].Y;
+                            flat[i * 2] = entity.Polyline[i].X;
+                            flat[i * 2 + 1] = entity.Polyline[i].Y;
                         }
 
-                        return flat;
+                        return new SceneEntityDto
+                        {
+                            Id = entity.Id.ToString(),
+                            Polyline = flat,
+                            ColorHex = ResolveEntityColor(entity),
+                        };
                     })
                     .ToList(),
             });
@@ -334,9 +446,9 @@ public sealed class WorkspaceState
         return scene;
     }
 
-    private string ResolvePartColor(PlacedPart part)
+    private string ResolveEntityColor(PartEntity entity)
     {
-        if (part.LayerId is Guid layerId)
+        if (entity.LayerId is Guid layerId)
         {
             var layer = _layers.FirstOrDefault(l => l.Id == layerId);
             if (layer is not null)

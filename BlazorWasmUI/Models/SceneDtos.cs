@@ -3,7 +3,8 @@ namespace BlazorWasmUI.Models;
 public sealed class SceneDto
 {
     public List<ScenePartDto> Parts { get; set; } = [];
-    public List<string> SelectedIds { get; set; } = [];
+    public List<string> SelectedPartIds { get; set; } = [];
+    public List<string> SelectedEntityIds { get; set; } = [];
     public ViewportDto Viewport { get; set; } = new();
 }
 
@@ -11,7 +12,7 @@ public sealed class ScenePartDto
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
-    public List<double[]> Polylines { get; set; } = [];
+    public List<SceneEntityDto> Entities { get; set; } = [];
     public double OffsetX { get; set; }
     public double OffsetY { get; set; }
     public double RotationDegrees { get; set; }
@@ -20,6 +21,12 @@ public sealed class ScenePartDto
     public double LocalMinY { get; set; }
     public double LocalMaxX { get; set; }
     public double LocalMaxY { get; set; }
+}
+
+public sealed class SceneEntityDto
+{
+    public string Id { get; set; } = "";
+    public double[] Polyline { get; set; } = [];
     public string? ColorHex { get; set; }
 }
 

@@ -9,21 +9,21 @@
         <button type="button"
                 class="tool-btn"
                 title="Mirror selection horizontally"
-                disabled="@(Workspace.SelectedIds.Count == 0)"
+                disabled="@(!Workspace.HasSelection)"
                 @onclick="MirrorHorizontal">
             <img src="img/mirror-tool.svg" alt="" class="tool-icon" />
         </button>
         <button type="button"
                 class="tool-btn"
                 title="Mirror selection vertically"
-                disabled="@(Workspace.SelectedIds.Count == 0)"
+                disabled="@(!Workspace.HasSelection)"
                 @onclick="MirrorVertical">
             <img src="img/mirror-tool.svg" alt="" class="tool-icon tool-icon--rotated" />
         </button>
         <button type="button"
                 class="tool-btn"
                 title="Delete selection (Delete)"
-                disabled="@(Workspace.SelectedIds.Count == 0)"
+                disabled="@(!Workspace.HasSelection)"
                 @onclick="DeleteAsync">
             <img src="img/delete.svg" alt="" class="tool-icon" />
         </button>

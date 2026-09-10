@@ -88,7 +88,10 @@ public sealed class DxfImportService
                             warnings.Add(
                                 $"Imported '{fileName}' via legacy ASCII fallback parser ({FormatVersion(version)}).");
                             var legacyLayers = ParseLegacyAsciiLayers(fallbackText);
-                            return BuildImportFromPolylines(fileName, fallbackPolylines, warnings, legacyLayers);
+                            var legacyGeom = fallbackPolylines
+                                .Select(p => new ImportedGeom { Points = p, ColorHex = null })
+                                .ToList();
+                            return BuildImportFromGeometry(fileName, legacyGeom, warnings, legacyLayers);
                         }
 
                         return ImportResult.Fail(
@@ -102,7 +105,7 @@ public sealed class DxfImportService
                 }
 
                 var entities = CollectEntities(doc);
-                var polylines = new List<List<Point2>>();
+                var geometry = new List<ImportedGeom>();
                 var layerTallies = new Dictionary<string, (string Name, string ColorHex, int Count)>(
                     StringComparer.OrdinalIgnoreCase);
 
@@ -113,7 +116,13 @@ public sealed class DxfImportService
                     try
                     {
                         TallyEntityEffectiveColor(entity, layerTallies);
-                        AppendEntity(entity, polylines);
+                        var batch = new List<List<Point2>>();
+                        AppendEntity(entity, batch);
+                        var hex = EffectiveColorHex(entity);
+                        foreach (var poly in batch)
+                        {
+                            geometry.Add(new ImportedGeom { Points = poly, ColorHex = hex });
+                        }
                     }
                     catch
                     {
@@ -132,7 +141,7 @@ public sealed class DxfImportService
                     .ThenBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                return BuildImportFromPolylines(fileName, polylines, warnings, importedLayers);
+                return BuildImportFromGeometry(fileName, geometry, warnings, importedLayers);
             }
         }
         catch (Exception ex)
@@ -141,25 +150,37 @@ public sealed class DxfImportService
         }
     }
 
-    private static ImportResult BuildImportFromPolylines(
+    private sealed class ImportedGeom
+    {
+        public required List<Point2> Points { get; init; }
+        public string? ColorHex { get; init; }
+    }
+
+    private static ImportResult BuildImportFromGeometry(
         string fileName,
-        IReadOnlyList<List<Point2>> polylines,
+        IReadOnlyList<ImportedGeom> geometry,
         List<string> warnings,
         IReadOnlyList<ImportedLayerInfo>? importedLayers = null)
     {
-        if (polylines.Count == 0)
+        if (geometry.Count == 0)
         {
             return ImportResult.Fail($"No drawable geometry found in '{fileName}'.", warnings);
         }
 
-        var allPoints = polylines.SelectMany(p => p);
+        var allPoints = geometry.SelectMany(g => g.Points);
         var bounds = Bounds2.FromPoints(allPoints);
         var center = bounds.Center;
 
-        var normalized = polylines
-            .Select(poly => (IReadOnlyList<Point2>)poly
-                .Select(p => new Point2(p.X - center.X, p.Y - center.Y))
-                .ToList())
+        var entities = geometry
+            .Select(g => new PartEntity
+            {
+                Polyline = g.Points
+                    .Select(p => new Point2(p.X - center.X, p.Y - center.Y))
+                    .ToList(),
+                SourceColorHex = g.ColorHex is null
+                    ? null
+                    : LayerPalette.NormalizeHex(g.ColorHex),
+            })
             .ToList();
 
         var localBounds = new Bounds2(
@@ -171,7 +192,7 @@ public sealed class DxfImportService
         var part = new PlacedPart
         {
             Name = fileName,
-            LocalPolylines = normalized,
+            Entities = entities,
             LocalBounds = localBounds,
             OffsetX = center.X,
             OffsetY = center.Y,

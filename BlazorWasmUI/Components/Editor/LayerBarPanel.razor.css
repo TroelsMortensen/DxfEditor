@@ -6,7 +6,7 @@
     padding: 6px 10px;
     height: 100%;
     box-sizing: border-box;
-    overflow-x: auto;
+    overflow: hidden;
 }
 
 .layer-bar__empty {

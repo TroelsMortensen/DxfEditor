@@ -75,12 +75,14 @@ public partial class DxfCanvas
     }
 
     [JSInvokable]
-    public void OnSelectionChanged(string[] ids)
+    public void OnSelectionChanged(string[] partIds, string[] entityIds)
     {
-        var guids = ids
+        static IEnumerable<Guid> ParseIds(string[]? ids) =>
+            (ids ?? [])
             .Select(id => Guid.TryParse(id, out var g) ? g : Guid.Empty)
             .Where(g => g != Guid.Empty);
-        Workspace.SetSelection(guids);
+
+        Workspace.SetSelection(ParseIds(partIds), ParseIds(entityIds));
     }
 
     [JSInvokable]
@@ -98,12 +100,13 @@ public partial class DxfCanvas
     [JSInvokable]
     public async Task OnDeleteRequested()
     {
-        if (Workspace.SelectedIds.Count == 0)
+        var editable = Workspace.GetEditableParts();
+        if (editable.Count == 0)
         {
             return;
         }
 
-        var count = Workspace.SelectedIds.Count;
+        var count = editable.Count;
         var message = count == 1
             ? "Delete the selected part?"
             : $"Delete the {count} selected parts?";

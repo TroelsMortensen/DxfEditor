@@ -19,7 +19,7 @@
 - Organize components into logical folders; match file names to component names.
 - Prefer code-behind (`.razor.cs`) over inline `@code` blocks.
 - Prefer local stylesheets (`.razor.css`) over global styles when it makes sense.
-- Current layout: `Models/`, `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`).
+- Current layout: `Models/` (`PlacedPart`, `PartEntity`, layers/scene DTOs), `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`).
 
 ## UI layout
 
@@ -27,7 +27,7 @@
 - **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), delete. Icons live under `wwwroot/img/`.
 - **Right sidebar:** layer editor (list + add from palette) above parts list; selecting a part row selects/highlights it on the canvas.
 - **Top bar:** app title only for now; export actions reserved for Phase 5.
-- **Bottom bar:** layer color buttons; click assigns the current selection to that layer.
+- **Bottom bar:** layer color buttons; click assigns the current block or entity selection to that layer.
 - **Rotate handle:** selection chrome includes a rotate handle using `img/rotate.svg`.
 
 ## Features
@@ -38,15 +38,15 @@
 | 2 | Multi-file drop; spread parts evenly | Done |
 | 3 | Drag a selected part (or multi-selection) to move | Done |
 | 4 | Rotate handle on selection | Done |
-| 5 | Click to select; clear selection chrome | Done |
-| 6 | Shift+click multi-select | Done |
-| 7 | Marquee (box) select | Done |
+| 5 | Click to select block; empty click / Escape clear | Done |
+| 6 | Shift+click multi-select blocks; Ctrl+click multi-select entities | Done |
+| 7 | Marquee (box) select blocks | Done |
 | 8 | Mirror selection horizontally (toolbar) | Done |
 | 9 | Mirror selection vertically (toolbar) | Done |
 | 10 | Delete selection (toolbar + Delete/Backspace, with confirm) | Done |
 | 11 | Pan (middle-mouse / Space+drag, grabbing cursor) and wheel zoom | Done |
 | 12 | Parts list selection sync with canvas | Done |
-| 13 | Layer / color assignment | Done |
+| 13 | Layer / color assignment (per block or per entity) | Done |
 | 14 | Bounding-box / sheet size readout | Not started (Phase 4) |
 | 15 | Master DXF export download | Not started (Phase 5) |
 | 16 | GitHub Pages deploy workflow | Not started (Phase 5) |
@@ -65,15 +65,15 @@
 - Pan and zoom (wheel toward cursor).
 
 **Phase 3: Transformations (Move, Rotate, Mirror, Delete)** — Done
-- Click / shift-click / marquee select on canvas; parts list selection.
-- Translate by drag; free rotate via handle; horizontal and vertical mirror from left toolbar.
-- Delete selected parts via toolbar button or Delete/Backspace, with confirmation prompt.
+- Click selects a DXF block; Shift+click / marquee multi-select blocks; parts list selection.
+- Ctrl+click selects individual entities (line/arc/circle/…) for layer assignment; Escape clears selection.
+- Move / rotate / mirror / delete always apply to whole parent block(s), keeping each import cohesive.
 - *(Precise numeric coordinate entry not implemented — deferred.)*
 
 **Phase 4: Layer & Color Assignment** — Mostly done
 - Layer configuration panel in the right sidebar (list + add from 10 distinct palette colors).
-- Assign selected parts to layers via bottom color bar; canvas strokes use layer color.
-- Import merges source DXF layer colors into the workspace palette; new parts get the dominant layer.
+- Bottom color bar assigns selected blocks (all entities) or selected entities to a layer; strokes use per-entity layer color.
+- Import preserves each entity’s source color into the workspace palette and assigns per-entity layers.
 - Bounding box / nested sheet dimensions readout — not started.
 
 **Phase 5: Master DXF Export & GitHub Pages Deployment** — Not started

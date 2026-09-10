@@ -14,7 +14,7 @@
         <ul class="parts-panel__list">
             @foreach (var part in Workspace.Parts)
             {
-                var selected = Workspace.SelectedIds.Contains(part.Id);
+                var selected = Workspace.SelectedPartIds.Contains(part.Id);
                 <li>
                     <button type="button"
                             class="parts-panel__item @(selected ? "is-selected" : null)"

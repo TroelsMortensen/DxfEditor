@@ -5,8 +5,8 @@ public sealed class PlacedPart
     public Guid Id { get; init; } = Guid.NewGuid();
     public required string Name { get; init; }
 
-    /// <summary>Polylines in part-local space (origin at local bbox center).</summary>
-    public required IReadOnlyList<IReadOnlyList<Point2>> LocalPolylines { get; init; }
+    /// <summary>Drawable entities in part-local space (origin at local bbox center).</summary>
+    public required IReadOnlyList<PartEntity> Entities { get; init; }
 
     public required Bounds2 LocalBounds { get; init; }
 
@@ -14,9 +14,6 @@ public sealed class PlacedPart
     public double OffsetY { get; set; }
     public double RotationDegrees { get; set; }
     public bool Mirrored { get; set; }
-
-    /// <summary>Workspace layer this part is assigned to (ByLayer color).</summary>
-    public Guid? LayerId { get; set; }
 
     public Point2 TransformLocalToWorld(Point2 local)
     {

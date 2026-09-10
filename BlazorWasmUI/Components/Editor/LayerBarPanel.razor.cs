@@ -15,13 +15,8 @@ public partial class LayerBarPanel : IDisposable
 
     private bool IsActiveLayer(Guid layerId)
     {
-        if (Workspace.SelectedIds.Count == 0)
-        {
-            return false;
-        }
-
-        var selected = Workspace.Parts.Where(p => Workspace.SelectedIds.Contains(p.Id)).ToList();
-        return selected.Count > 0 && selected.All(p => p.LayerId == layerId);
+        var targets = Workspace.GetLayerAssignmentTargets();
+        return targets.Count > 0 && targets.All(e => e.LayerId == layerId);
     }
 
     public void Dispose() => Workspace.Changed -= OnChanged;

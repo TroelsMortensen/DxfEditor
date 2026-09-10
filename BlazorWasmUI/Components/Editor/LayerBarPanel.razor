@@ -17,7 +17,7 @@
                     class="layer-bar__btn @(isActive ? "is-active" : null)"
                     title="@layer.Name (@layer.ColorHex)"
                     style="--layer-color: @layer.ColorHex"
-                    disabled="@(Workspace.SelectedIds.Count == 0)"
+                    disabled="@(!Workspace.HasSelection)"
                     @onclick="() => Assign(layer.Id)">
                 <span class="layer-bar__swatch"></span>
             </button>

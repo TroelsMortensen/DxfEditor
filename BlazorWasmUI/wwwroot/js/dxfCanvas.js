@@ -6,7 +6,8 @@ export function createCanvasController(canvas, dotNetRef) {
   const ctx = canvas.getContext("2d");
   const state = {
     parts: [],
-    selectedIds: new Set(),
+    selectedPartIds: new Set(),
+    selectedEntityIds: new Set(),
     panX: 0,
     panY: 0,
     zoom: 1,
@@ -116,6 +117,27 @@ export function createCanvasController(canvas, dotNetRef) {
     return null;
   }
 
+  /** Parent blocks to move/rotate/chrome when parts or entities are selected. */
+  function getEditablePartIds() {
+    if (state.selectedPartIds.size > 0) {
+      return new Set(state.selectedPartIds);
+    }
+    const ids = new Set();
+    for (const part of state.parts) {
+      for (const ent of part.entities) {
+        if (state.selectedEntityIds.has(ent.id)) {
+          ids.add(part.id);
+          break;
+        }
+      }
+    }
+    return ids;
+  }
+
+  function hasSelection() {
+    return state.selectedPartIds.size > 0 || state.selectedEntityIds.size > 0;
+  }
+
   function partWorldCorners(part, overlay) {
     const corners = [
       [part.localMinX, part.localMinY],
@@ -128,7 +150,10 @@ export function createCanvasController(canvas, dotNetRef) {
 
   function partWorldBounds(part, overlay) {
     const pts = partWorldCorners(part, overlay);
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     for (const p of pts) {
       minX = Math.min(minX, p.x);
       minY = Math.min(minY, p.y);
@@ -139,10 +164,14 @@ export function createCanvasController(canvas, dotNetRef) {
   }
 
   function selectionWorldBounds() {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const editable = getEditablePartIds();
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     let any = false;
     for (const part of state.parts) {
-      if (!state.selectedIds.has(part.id)) continue;
+      if (!editable.has(part.id)) continue;
       any = true;
       const b = partWorldBounds(part, getTransientOverlay(part.id));
       minX = Math.min(minX, b.minX);
@@ -185,7 +214,8 @@ export function createCanvasController(canvas, dotNetRef) {
     return Math.sqrt(ex * ex + ey * ey);
   }
 
-  function hitTestPart(screenX, screenY) {
+  /** @returns {{ partId: string, entityId: string } | null} */
+  function hitTestEntity(screenX, screenY) {
     const world = screenToWorld(screenX, screenY);
     const thresh = HIT_PX / state.zoom;
     // Top-most last in list wins: iterate reverse.
@@ -201,12 +231,13 @@ export function createCanvasController(canvas, dotNetRef) {
       ) {
         continue;
       }
-      for (const flat of part.polylines) {
+      for (const ent of part.entities) {
+        const flat = ent.polyline;
         for (let j = 0; j + 3 < flat.length; j += 2) {
           const a = transformLocal(part, flat[j], flat[j + 1], overlay);
           const c = transformLocal(part, flat[j + 2], flat[j + 3], overlay);
           if (distPointSeg(world.x, world.y, a.x, a.y, c.x, c.y) <= thresh) {
-            return part.id;
+            return { partId: part.id, entityId: ent.id };
           }
         }
       }
@@ -264,23 +295,32 @@ export function createCanvasController(canvas, dotNetRef) {
     return f * pow;
   }
 
-  function drawPart(part, selected) {
-    const overlay = getTransientOverlay(part.id);
-    ctx.beginPath();
-    for (const flat of part.polylines) {
-      if (flat.length < 4) continue;
-      const p0 = transformLocal(part, flat[0], flat[1], overlay);
-      const s0 = worldToScreen(p0.x, p0.y);
-      ctx.moveTo(s0.x, s0.y);
-      for (let i = 2; i + 1 < flat.length; i += 2) {
-        const p = transformLocal(part, flat[i], flat[i + 1], overlay);
-        const s = worldToScreen(p.x, p.y);
-        ctx.lineTo(s.x, s.y);
-      }
+  function drawEntityPath(part, flat, overlay) {
+    if (flat.length < 4) return false;
+    const p0 = transformLocal(part, flat[0], flat[1], overlay);
+    const s0 = worldToScreen(p0.x, p0.y);
+    ctx.moveTo(s0.x, s0.y);
+    for (let i = 2; i + 1 < flat.length; i += 2) {
+      const p = transformLocal(part, flat[i], flat[i + 1], overlay);
+      const s = worldToScreen(p.x, p.y);
+      ctx.lineTo(s.x, s.y);
     }
-    ctx.strokeStyle = part.colorHex || "#d7dde5";
-    ctx.lineWidth = selected ? 2 : 1.25;
-    ctx.stroke();
+    return true;
+  }
+
+  function drawPart(part) {
+    const overlay = getTransientOverlay(part.id);
+    const partSelected = state.selectedPartIds.has(part.id);
+    for (const ent of part.entities) {
+      const entitySelected = state.selectedEntityIds.has(ent.id);
+      ctx.beginPath();
+      if (!drawEntityPath(part, ent.polyline, overlay)) continue;
+      ctx.strokeStyle = ent.colorHex || "#d7dde5";
+      ctx.lineWidth = partSelected || entitySelected ? 2.25 : 1.25;
+      ctx.setLineDash(entitySelected ? [6, 4] : []);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   function drawSelectionChrome() {
@@ -349,7 +389,7 @@ export function createCanvasController(canvas, dotNetRef) {
     drawGrid();
 
     for (const part of state.parts) {
-      drawPart(part, state.selectedIds.has(part.id));
+      drawPart(part);
     }
     drawSelectionChrome();
     drawMarquee();
@@ -367,12 +407,37 @@ export function createCanvasController(canvas, dotNetRef) {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
+  function beginMoveInteraction(partIds, pointerId, screenX, screenY) {
+    const world = screenToWorld(screenX, screenY);
+    const base = {};
+    const ids = new Set(partIds);
+    for (const part of state.parts) {
+      if (!ids.has(part.id)) continue;
+      base[part.id] = {
+        offsetX: part.offsetX,
+        offsetY: part.offsetY,
+        rotationDegrees: part.rotationDegrees,
+        mirrored: part.mirrored,
+      };
+    }
+    state.interaction = {
+      type: "move",
+      ids,
+      base,
+      startWorld: world,
+      dx: 0,
+      dy: 0,
+      pointerId,
+      moved: false,
+    };
+    canvas.setPointerCapture(pointerId);
+  }
+
   function onPointerDown(e) {
     canvas.focus({ preventScroll: true });
     const p = pointerPos(e);
     const isPan =
-      e.button === 1 ||
-      (e.button === 0 && (state.spaceDown || e.altKey));
+      e.button === 1 || (e.button === 0 && (state.spaceDown || e.altKey));
 
     if (isPan) {
       state.interaction = {
@@ -390,14 +455,14 @@ export function createCanvasController(canvas, dotNetRef) {
 
     if (e.button !== 0) return;
 
-    if (state.selectedIds.size > 0 && hitRotateHandle(p.x, p.y)) {
+    const editableIds = getEditablePartIds();
+    if (editableIds.size > 0 && hitRotateHandle(p.x, p.y)) {
       const centroid = selectionCentroid();
       const world = screenToWorld(p.x, p.y);
       const startAngle = Math.atan2(world.y - centroid.y, world.x - centroid.x);
       const base = {};
-      const ids = new Set(state.selectedIds);
       for (const part of state.parts) {
-        if (!ids.has(part.id)) continue;
+        if (!editableIds.has(part.id)) continue;
         base[part.id] = {
           offsetX: part.offsetX,
           offsetY: part.offsetY,
@@ -407,7 +472,7 @@ export function createCanvasController(canvas, dotNetRef) {
       }
       state.interaction = {
         type: "rotate",
-        ids,
+        ids: new Set(editableIds),
         base,
         centroid,
         startAngle,
@@ -420,50 +485,54 @@ export function createCanvasController(canvas, dotNetRef) {
       return;
     }
 
-    const hit = hitTestPart(p.x, p.y);
+    const hit = hitTestEntity(p.x, p.y);
     if (hit) {
-      if (e.shiftKey) {
-        if (state.selectedIds.has(hit)) state.selectedIds.delete(hit);
-        else state.selectedIds.add(hit);
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      if (ctrl) {
+        // Entity selection mode (mutually exclusive with part selection).
+        state.selectedPartIds = new Set();
+        if (state.selectedEntityIds.has(hit.entityId)) {
+          state.selectedEntityIds.delete(hit.entityId);
+        } else {
+          state.selectedEntityIds.add(hit.entityId);
+        }
         commitSelection();
-      } else if (!state.selectedIds.has(hit)) {
-        state.selectedIds = new Set([hit]);
+        const parents = getEditablePartIds();
+        if (parents.size > 0) {
+          beginMoveInteraction(parents, e.pointerId, p.x, p.y);
+        }
+      } else if (e.shiftKey) {
+        // Block multi-select.
+        state.selectedEntityIds = new Set();
+        if (state.selectedPartIds.has(hit.partId)) {
+          state.selectedPartIds.delete(hit.partId);
+        } else {
+          state.selectedPartIds.add(hit.partId);
+        }
         commitSelection();
+        if (state.selectedPartIds.has(hit.partId)) {
+          beginMoveInteraction(state.selectedPartIds, e.pointerId, p.x, p.y);
+        }
+      } else {
+        // Plain click: select entire block.
+        state.selectedEntityIds = new Set();
+        if (!state.selectedPartIds.has(hit.partId) || state.selectedPartIds.size !== 1) {
+          state.selectedPartIds = new Set([hit.partId]);
+          commitSelection();
+        }
+        beginMoveInteraction(state.selectedPartIds, e.pointerId, p.x, p.y);
       }
 
-      if (state.selectedIds.has(hit)) {
-        const world = screenToWorld(p.x, p.y);
-        const base = {};
-        const ids = new Set(state.selectedIds);
-        for (const part of state.parts) {
-          if (!ids.has(part.id)) continue;
-          base[part.id] = {
-            offsetX: part.offsetX,
-            offsetY: part.offsetY,
-            rotationDegrees: part.rotationDegrees,
-            mirrored: part.mirrored,
-          };
-        }
-        state.interaction = {
-          type: "move",
-          ids,
-          base,
-          startWorld: world,
-          dx: 0,
-          dy: 0,
-          pointerId: e.pointerId,
-          moved: false,
-        };
-        canvas.setPointerCapture(e.pointerId);
-      }
       e.preventDefault();
       invalidate();
       return;
     }
 
-    // Empty space: marquee (or clear if plain click).
+    // Empty space: clear on plain click, then marquee (block-level).
     if (!e.shiftKey) {
-      state.selectedIds = new Set();
+      state.selectedPartIds = new Set();
+      state.selectedEntityIds = new Set();
       commitSelection();
     }
     state.interaction = {
@@ -564,7 +633,6 @@ export function createCanvasController(canvas, dotNetRef) {
       const sin = Math.sin(rad);
       for (const id of i.ids) {
         const b = i.base[id];
-        // Rotate part origin around selection centroid, and add delta to rotation.
         const dx = b.offsetX - i.centroid.x;
         const dy = b.offsetY - i.centroid.y;
         const nx = i.centroid.x + dx * cos - dy * sin;
@@ -605,14 +673,20 @@ export function createCanvasController(canvas, dotNetRef) {
       const hits = [];
       for (const part of state.parts) {
         const b = partWorldBounds(part, null);
-        if (b.maxX >= box.minX && b.minX <= box.maxX && b.maxY >= box.minY && b.minY <= box.maxY) {
+        if (
+          b.maxX >= box.minX &&
+          b.minX <= box.maxX &&
+          b.maxY >= box.minY &&
+          b.minY <= box.maxY
+        ) {
           hits.push(part.id);
         }
       }
+      state.selectedEntityIds = new Set();
       if (i.shift) {
-        for (const id of hits) state.selectedIds.add(id);
+        for (const id of hits) state.selectedPartIds.add(id);
       } else {
-        state.selectedIds = new Set(hits);
+        state.selectedPartIds = new Set(hits);
       }
       state.interaction = null;
       await commitSelection();
@@ -649,7 +723,11 @@ export function createCanvasController(canvas, dotNetRef) {
 
   async function commitSelection() {
     try {
-      await dotNetRef.invokeMethodAsync("OnSelectionChanged", Array.from(state.selectedIds));
+      await dotNetRef.invokeMethodAsync(
+        "OnSelectionChanged",
+        Array.from(state.selectedPartIds),
+        Array.from(state.selectedEntityIds)
+      );
     } catch {
       /* disposed */
     }
@@ -667,7 +745,18 @@ export function createCanvasController(canvas, dotNetRef) {
       return;
     }
 
-    if ((e.key === "Delete" || e.key === "Backspace") && state.selectedIds.size > 0) {
+    if (e.key === "Escape") {
+      if (hasSelection()) {
+        state.selectedPartIds = new Set();
+        state.selectedEntityIds = new Set();
+        commitSelection();
+        invalidate();
+      }
+      e.preventDefault();
+      return;
+    }
+
+    if ((e.key === "Delete" || e.key === "Backspace") && getEditablePartIds().size > 0) {
       e.preventDefault();
       dotNetRef.invokeMethodAsync("OnDeleteRequested");
     }
@@ -732,7 +821,11 @@ export function createCanvasController(canvas, dotNetRef) {
       state.parts = (scene.parts || []).map((p) => ({
         id: p.id,
         name: p.name,
-        polylines: p.polylines || [],
+        entities: (p.entities || []).map((ent) => ({
+          id: ent.id,
+          polyline: ent.polyline || [],
+          colorHex: ent.colorHex || null,
+        })),
         offsetX: p.offsetX,
         offsetY: p.offsetY,
         rotationDegrees: p.rotationDegrees,
@@ -741,9 +834,9 @@ export function createCanvasController(canvas, dotNetRef) {
         localMinY: p.localMinY,
         localMaxX: p.localMaxX,
         localMaxY: p.localMaxY,
-        colorHex: p.colorHex || null,
       }));
-      state.selectedIds = new Set(scene.selectedIds || []);
+      state.selectedPartIds = new Set(scene.selectedPartIds || []);
+      state.selectedEntityIds = new Set(scene.selectedEntityIds || []);
       // Viewport stays JS-authoritative; C# is updated via OnViewportChanged only.
       invalidate();
     },
