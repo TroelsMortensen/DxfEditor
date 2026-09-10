@@ -5,33 +5,40 @@
 @implements IDisposable
 
 <aside class="tools-panel">
-    <label class="tool-btn" title="Import DXF files">
-        <img src="img/import.svg" alt="" class="tool-icon" />
-        <InputFile @key="_importInputKey"
-                   OnChange="OnFilesSelected"
-                   accept=".dxf"
-                   multiple
-                   style="display: none;" />
-    </label>
-    <button type="button"
-            class="tool-btn"
-            title="Mirror selection horizontally"
-            disabled="@(Workspace.SelectedIds.Count == 0)"
-            @onclick="MirrorHorizontal">
-        <img src="img/mirror-tool.svg" alt="" class="tool-icon" />
-    </button>
-    <button type="button"
-            class="tool-btn"
-            title="Mirror selection vertically"
-            disabled="@(Workspace.SelectedIds.Count == 0)"
-            @onclick="MirrorVertical">
-        <img src="img/mirror-tool.svg" alt="" class="tool-icon tool-icon--rotated" />
-    </button>
-    <button type="button"
-            class="tool-btn"
-            title="Delete selection (Delete)"
-            disabled="@(Workspace.SelectedIds.Count == 0)"
-            @onclick="DeleteAsync">
-        <img src="img/delete.svg" alt="" class="tool-icon" />
-    </button>
+    <div class="tools-panel__group tools-panel__group--top">
+        <button type="button"
+                class="tool-btn"
+                title="Mirror selection horizontally"
+                disabled="@(Workspace.SelectedIds.Count == 0)"
+                @onclick="MirrorHorizontal">
+            <img src="img/mirror-tool.svg" alt="" class="tool-icon" />
+        </button>
+        <button type="button"
+                class="tool-btn"
+                title="Mirror selection vertically"
+                disabled="@(Workspace.SelectedIds.Count == 0)"
+                @onclick="MirrorVertical">
+            <img src="img/mirror-tool.svg" alt="" class="tool-icon tool-icon--rotated" />
+        </button>
+        <button type="button"
+                class="tool-btn"
+                title="Delete selection (Delete)"
+                disabled="@(Workspace.SelectedIds.Count == 0)"
+                @onclick="DeleteAsync">
+            <img src="img/delete.svg" alt="" class="tool-icon" />
+        </button>
+    </div>
+    <div class="tools-panel__divider" aria-hidden="true"></div>
+    <div class="tools-panel__spacer" aria-hidden="true"></div>
+    <div class="tools-panel__divider" aria-hidden="true"></div>
+    <div class="tools-panel__group tools-panel__group--bottom">
+        <label class="tool-btn" title="Import DXF files">
+            <img src="img/import.svg" alt="" class="tool-icon" />
+            <InputFile @key="_importInputKey"
+                       OnChange="OnFilesSelected"
+                       accept=".dxf"
+                       multiple
+                       style="display: none;" />
+        </label>
+    </div>
 </aside>

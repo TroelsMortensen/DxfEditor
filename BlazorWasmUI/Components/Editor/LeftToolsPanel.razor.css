@@ -8,6 +8,25 @@
     box-sizing: border-box;
 }
 
+.tools-panel__group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.tools-panel__divider {
+    width: 24px;
+    height: 1px;
+    background: #3a414d;
+    flex-shrink: 0;
+}
+
+.tools-panel__spacer {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .tool-btn {
     position: relative;
     display: flex;
