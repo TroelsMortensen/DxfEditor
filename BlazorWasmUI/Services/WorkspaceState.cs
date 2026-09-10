@@ -23,14 +23,49 @@ public sealed class WorkspaceState
     public double PanY { get; private set; }
     public double Zoom { get; private set; } = 1;
 
+    private const int StatusClearDelayMs = 5000;
+
     public string? StatusMessage { get; private set; }
+
+    private CancellationTokenSource? _statusClearCts;
 
     public event Action? Changed;
 
     public void SetStatus(string? message)
     {
+        _statusClearCts?.Cancel();
+        _statusClearCts?.Dispose();
+        _statusClearCts = null;
+
         StatusMessage = message;
         Notify();
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        _statusClearCts = new CancellationTokenSource();
+        var token = _statusClearCts.Token;
+        _ = ClearStatusAfterDelayAsync(token);
+    }
+
+    private async Task ClearStatusAfterDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(StatusClearDelayMs, token);
+            StatusMessage = null;
+            Notify();
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer status replaced this one.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Timer was cancelled and disposed.
+        }
     }
 
     public LayerDefinition EnsureLayer(string name, string colorHex)
@@ -403,8 +438,7 @@ public sealed class WorkspaceState
         _selectedEntityIds.Clear();
         if (removed > 0)
         {
-            StatusMessage = removed == 1 ? "Deleted 1 part." : $"Deleted {removed} parts.";
-            Notify();
+            SetStatus(removed == 1 ? "Deleted 1 part." : $"Deleted {removed} parts.");
         }
 
         return removed;
