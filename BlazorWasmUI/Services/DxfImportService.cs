@@ -131,6 +131,9 @@ public sealed class DxfImportService
                 }
 
                 var importedLayers = layerTallies.Values
+                    // Skip unused table layers (e.g. default Layer 0) so they do not
+                    // pollute the workspace palette when no entity uses that color.
+                    .Where(v => v.Count > 0)
                     .Select(v => new ImportedLayerInfo
                     {
                         Name = v.Name,
@@ -788,6 +791,7 @@ public sealed class DxfImportService
         FlushLayer();
 
         return tallies.Values
+            // Legacy geometry has no per-entity colors, so keep table layers even when Count is 0.
             .Select(v => new ImportedLayerInfo
             {
                 Name = v.Name,

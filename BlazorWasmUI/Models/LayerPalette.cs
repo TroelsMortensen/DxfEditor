@@ -14,7 +14,7 @@ public static class LayerPalette
         "#8E24AA", // purple
         "#D81B60", // magenta
         "#6D4C41", // brown
-        "#ECEFF1", // light gray / white
+        "#FFFFFF", // white (matches AutoCAD ACI 7 / typical DXF Layer 0)
     ];
 
     public static string NormalizeHex(string colorHex)
