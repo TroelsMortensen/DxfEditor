@@ -254,6 +254,15 @@ export function createCanvasController(canvas, dotNetRef) {
     return dx * dx + dy * dy <= HANDLE_HIT * HANDLE_HIT;
   }
 
+  function updateHoverCursor(screenX, screenY) {
+    if (state.interaction) return;
+    if (getEditablePartIds().size > 0 && hitRotateHandle(screenX, screenY)) {
+      canvas.style.cursor = "grab";
+    } else {
+      canvas.style.cursor = "";
+    }
+  }
+
   function drawGrid() {
     const stepWorld = niceGridStep(80 / state.zoom);
     const topLeft = screenToWorld(0, 0);
@@ -479,6 +488,7 @@ export function createCanvasController(canvas, dotNetRef) {
         deltaDeg: 0,
         pointerId: e.pointerId,
       };
+      canvas.style.cursor = "grabbing";
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
       invalidate();
@@ -551,8 +561,11 @@ export function createCanvasController(canvas, dotNetRef) {
 
   function onPointerMove(e) {
     const i = state.interaction;
-    if (!i || i.pointerId !== e.pointerId) return;
     const p = pointerPos(e);
+    if (!i || i.pointerId !== e.pointerId) {
+      updateHoverCursor(p.x, p.y);
+      return;
+    }
 
     if (i.type === "pan") {
       state.panX += p.x - i.lastX;
@@ -587,13 +600,20 @@ export function createCanvasController(canvas, dotNetRef) {
     }
   }
 
+  function onPointerLeave(e) {
+    if (state.interaction) return;
+    canvas.style.cursor = "";
+  }
+
   async function onPointerUp(e) {
     const i = state.interaction;
     if (!i || i.pointerId !== e.pointerId) return;
 
+    const p = pointerPos(e);
+
     if (i.type === "pan") {
       state.interaction = null;
-      canvas.style.cursor = "";
+      updateHoverCursor(p.x, p.y);
       await commitViewport();
       invalidate();
       return;
@@ -618,9 +638,11 @@ export function createCanvasController(canvas, dotNetRef) {
           }
         }
         state.interaction = null;
+        updateHoverCursor(p.x, p.y);
         await dotNetRef.invokeMethodAsync("OnPartsTransformed", transforms);
       } else {
         state.interaction = null;
+        updateHoverCursor(p.x, p.y);
       }
       invalidate();
       return;
@@ -653,6 +675,7 @@ export function createCanvasController(canvas, dotNetRef) {
         }
       }
       state.interaction = null;
+      updateHoverCursor(p.x, p.y);
       await dotNetRef.invokeMethodAsync("OnPartsTransformed", transforms);
       invalidate();
       return;
@@ -689,6 +712,7 @@ export function createCanvasController(canvas, dotNetRef) {
         state.selectedPartIds = new Set(hits);
       }
       state.interaction = null;
+      updateHoverCursor(p.x, p.y);
       await commitSelection();
       invalidate();
     }
@@ -802,6 +826,7 @@ export function createCanvasController(canvas, dotNetRef) {
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("dragover", onDragOver);
   canvas.addEventListener("drop", onDrop);
@@ -848,6 +873,7 @@ export function createCanvasController(canvas, dotNetRef) {
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("dragover", onDragOver);
       canvas.removeEventListener("drop", onDrop);

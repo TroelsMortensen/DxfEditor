@@ -18,7 +18,7 @@
                 <li>
                     <button type="button"
                             class="parts-panel__item @(selected ? "is-selected" : null)"
-                            @onclick="() => Select(part.Id)">
+                            @onclick="e => Select(part.Id, e)">
                         @part.Name
                     </button>
                 </li>
