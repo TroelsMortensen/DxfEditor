@@ -15,6 +15,7 @@ export function createCanvasController(canvas, dotNetRef) {
     raf: 0,
     spaceDown: false,
     interaction: null, // { type, ... }
+    lastPointerScreen: null, // { x, y } while pointer is over canvas
     cssWidth: 0,
     cssHeight: 0,
     dpr: 1,
@@ -449,6 +450,7 @@ export function createCanvasController(canvas, dotNetRef) {
   function onPointerDown(e) {
     canvas.focus({ preventScroll: true });
     const p = pointerPos(e);
+    state.lastPointerScreen = p;
     const isPan =
       e.button === 1 || (e.button === 0 && (state.spaceDown || e.altKey));
 
@@ -566,6 +568,7 @@ export function createCanvasController(canvas, dotNetRef) {
   function onPointerMove(e) {
     const i = state.interaction;
     const p = pointerPos(e);
+    state.lastPointerScreen = p;
     if (!i || i.pointerId !== e.pointerId) {
       updateHoverCursor(p.x, p.y);
       return;
@@ -605,6 +608,7 @@ export function createCanvasController(canvas, dotNetRef) {
   }
 
   function onPointerLeave(e) {
+    state.lastPointerScreen = null;
     if (state.interaction) return;
     canvas.style.cursor = "";
   }
@@ -784,6 +788,18 @@ export function createCanvasController(canvas, dotNetRef) {
         invalidate();
       }
       e.preventDefault();
+      return;
+    }
+
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "d" || e.key === "D") && getEditablePartIds().size > 0) {
+      e.preventDefault();
+      if (state.lastPointerScreen) {
+        const w = screenToWorld(state.lastPointerScreen.x, state.lastPointerScreen.y);
+        dotNetRef.invokeMethodAsync("OnDuplicateRequested", w.x, w.y);
+      } else {
+        dotNetRef.invokeMethodAsync("OnDuplicateRequested", null, null);
+      }
       return;
     }
 

@@ -25,6 +25,8 @@ public partial class LeftToolsPanel : IDisposable
 
     private void MirrorVertical() => Workspace.MirrorSelectionVertical();
 
+    private void Duplicate() => Workspace.DuplicateSelection();
+
     private async Task OnFilesSelected(InputFileChangeEventArgs e)
     {
         var files = new List<(string Name, byte[] Data)>();

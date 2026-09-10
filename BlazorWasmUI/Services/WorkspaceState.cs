@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using BlazorWasmUI.Models;
 
 namespace BlazorWasmUI.Services;
@@ -442,6 +443,89 @@ public sealed class WorkspaceState
         }
 
         return removed;
+    }
+
+    public int DuplicateSelection(double? placeAtWorldX = null, double? placeAtWorldY = null)
+    {
+        var selected = GetEditableParts();
+        if (selected.Count == 0)
+        {
+            return 0;
+        }
+
+        double dx;
+        double dy;
+        if (placeAtWorldX is { } wx && placeAtWorldY is { } wy)
+        {
+            var centroid = GetSelectionCentroid(selected);
+            dx = wx - centroid.X;
+            dy = wy - centroid.Y;
+        }
+        else
+        {
+            var zoom = Math.Max(Zoom, 1e-9);
+            dx = 50.0 / zoom;
+            dy = -50.0 / zoom;
+        }
+
+        var takenNames = _parts.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var clones = new List<PlacedPart>(selected.Count);
+
+        foreach (var source in selected)
+        {
+            var name = NextUniqueCopyName(source.Name, takenNames);
+            takenNames.Add(name);
+
+            var entities = source.Entities
+                .Select(e => new PartEntity
+                {
+                    Polyline = e.Polyline.ToList(),
+                    LayerId = e.LayerId,
+                    SourceColorHex = e.SourceColorHex,
+                })
+                .ToList();
+
+            clones.Add(new PlacedPart
+            {
+                Name = name,
+                Entities = entities,
+                LocalBounds = source.LocalBounds,
+                OffsetX = source.OffsetX + dx,
+                OffsetY = source.OffsetY + dy,
+                RotationDegrees = source.RotationDegrees,
+                Mirrored = source.Mirrored,
+            });
+        }
+
+        _parts.AddRange(clones);
+        _selectedPartIds.Clear();
+        _selectedEntityIds.Clear();
+        foreach (var clone in clones)
+        {
+            _selectedPartIds.Add(clone.Id);
+        }
+
+        SetStatus(clones.Count == 1 ? "Duplicated 1 part." : $"Duplicated {clones.Count} parts.");
+        return clones.Count;
+    }
+
+    private static string NextUniqueCopyName(string sourceName, HashSet<string> taken)
+    {
+        var baseName = StripCopySuffix(sourceName);
+        for (var n = 1; ; n++)
+        {
+            var candidate = $"{baseName} ({n})";
+            if (!taken.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static string StripCopySuffix(string name)
+    {
+        var match = Regex.Match(name, @"^(.*) \((\d+)\)$");
+        return match.Success ? match.Groups[1].Value : name;
     }
 
     public SceneDto BuildScene()

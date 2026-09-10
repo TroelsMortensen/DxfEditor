@@ -19,12 +19,13 @@
 - Organize components into logical folders; match file names to component names.
 - Prefer code-behind (`.razor.cs`) over inline `@code` blocks.
 - Prefer local stylesheets (`.razor.css`) over global styles when it makes sense.
-- Current layout: `Models/` (`PlacedPart`, `PartEntity`, layers/scene DTOs), `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`).
+- Current layout: `Models/` (`PlacedPart`, `PartEntity`, layers/scene DTOs), `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`, `InfoHelpModal`).
 
 ## UI layout
 
 - **Canvas (center):** primary surface for DXF parts; drop target for `.dxf` files; pan/zoom/select/transform.
-- **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), delete. Icons live under `wwwroot/img/`.
+- **Info button:** 50×50 overlay at canvas top-left (`img/info.svg`); opens a scrollable help modal describing toolbar, layers, parts list, layer bar, and canvas gestures.
+- **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), duplicate, delete; import at the bottom. Icons live under `wwwroot/img/`.
 - **Right sidebar:** layer editor (list + add from palette) above parts list; selecting a part row selects/highlights it on the canvas.
 - **Top bar:** app title only for now; export actions reserved for Phase 5.
 - **Bottom bar:** layer color buttons; click assigns the current block or entity selection to that layer.
@@ -50,6 +51,8 @@
 | 14 | Bounding-box / sheet size readout | Not started (Phase 4) |
 | 15 | Master DXF export download | Not started (Phase 5) |
 | 16 | GitHub Pages deploy workflow | Not started (Phase 5) |
+| 17 | In-app help modal (info button on canvas) | Done |
+| 18 | Duplicate selection (toolbar offsets ~50px; Ctrl/Cmd+D places at cursor; unique `(n)` names in Parts list) | Done |
 
 ## Functional Requirements & Tasks (Phased Breakdown)
 
@@ -64,10 +67,11 @@
 - JS-owned rAF canvas loop; Blazor pushes scene snapshots and receives commit callbacks.
 - Pan and zoom (wheel toward cursor).
 
-**Phase 3: Transformations (Move, Rotate, Mirror, Delete)** — Done
+**Phase 3: Transformations (Move, Rotate, Mirror, Duplicate, Delete)** — Done
 - Click selects a DXF block; Shift+click / marquee multi-select blocks; parts list selection.
 - Ctrl+click selects individual entities (line/arc/circle/…) for layer assignment; Escape clears selection.
-- Move / rotate / mirror / delete always apply to whole parent block(s), keeping each import cohesive.
+- Move / rotate / mirror / duplicate / delete always apply to whole parent block(s), keeping each import cohesive.
+- Duplicate deep-copies selected blocks and adds uniquely named `(n)` entries to the Parts list. Toolbar offsets copies slightly; Ctrl/Cmd+D places the selection’s world bounding-box center at the mouse cursor.
 - *(Precise numeric coordinate entry not implemented — deferred.)*
 
 **Phase 4: Layer & Color Assignment** — Mostly done

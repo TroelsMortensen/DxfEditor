@@ -127,6 +127,13 @@ public partial class DxfCanvas
     }
 
     [JSInvokable]
+    public Task OnDuplicateRequested(double? worldX, double? worldY)
+    {
+        Workspace.DuplicateSelection(worldX, worldY);
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
     public Task OnFilesDropped(DroppedFileDto[] files)
     {
         var decoded = new List<(string Name, byte[] Data)>();
