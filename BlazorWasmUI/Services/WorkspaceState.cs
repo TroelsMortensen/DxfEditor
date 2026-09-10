@@ -4,10 +4,15 @@ namespace BlazorWasmUI.Services;
 
 public sealed class WorkspaceState
 {
+    private const string FallbackStrokeHex = "#d7dde5";
+
     private readonly List<PlacedPart> _parts = [];
+    private readonly List<LayerDefinition> _layers = [];
     private readonly HashSet<Guid> _selectedIds = [];
+    private int _nextLayerNumber = 1;
 
     public IReadOnlyList<PlacedPart> Parts => _parts;
+    public IReadOnlyList<LayerDefinition> Layers => _layers;
     public IReadOnlyCollection<Guid> SelectedIds => _selectedIds;
 
     public double PanX { get; private set; }
@@ -22,6 +27,107 @@ public sealed class WorkspaceState
     {
         StatusMessage = message;
         Notify();
+    }
+
+    public LayerDefinition EnsureLayer(string name, string colorHex)
+    {
+        var hex = LayerPalette.NormalizeHex(colorHex);
+        var existing = _layers.FirstOrDefault(l =>
+            string.Equals(l.ColorHex, hex, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var layer = new LayerDefinition
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? NextAutoLayerName() : name.Trim(),
+            ColorHex = hex,
+        };
+        _layers.Add(layer);
+        Notify();
+        return layer;
+    }
+
+    /// <summary>Merge many layers and raise a single change notification.</summary>
+    public IReadOnlyList<LayerDefinition> EnsureLayers(
+        IEnumerable<(string Name, string ColorHex)> layers)
+    {
+        var result = new List<LayerDefinition>();
+        var added = false;
+        foreach (var (name, colorHex) in layers)
+        {
+            var hex = LayerPalette.NormalizeHex(colorHex);
+            var existing = _layers.FirstOrDefault(l =>
+                string.Equals(l.ColorHex, hex, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                result.Add(existing);
+                continue;
+            }
+
+            var layer = new LayerDefinition
+            {
+                Name = string.IsNullOrWhiteSpace(name) ? NextAutoLayerName() : name.Trim(),
+                ColorHex = hex,
+            };
+            _layers.Add(layer);
+            result.Add(layer);
+            added = true;
+        }
+
+        if (added)
+        {
+            Notify();
+        }
+
+        return result;
+    }
+
+    public LayerDefinition? AddLayerFromPalette(string colorHex)
+    {
+        var hex = LayerPalette.NormalizeHex(colorHex);
+        if (_layers.Any(l => string.Equals(l.ColorHex, hex, StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        if (!LayerPalette.Colors.Any(c => string.Equals(c, hex, StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        var layer = new LayerDefinition
+        {
+            Name = NextAutoLayerName(),
+            ColorHex = hex,
+        };
+        _layers.Add(layer);
+        Notify();
+        return layer;
+    }
+
+    public void AssignSelectionToLayer(Guid layerId)
+    {
+        if (_selectedIds.Count == 0 || _layers.All(l => l.Id != layerId))
+        {
+            return;
+        }
+
+        var changed = false;
+        foreach (var part in _parts.Where(p => _selectedIds.Contains(p.Id)))
+        {
+            if (part.LayerId != layerId)
+            {
+                part.LayerId = layerId;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            Notify();
+        }
     }
 
     public void AddParts(IEnumerable<PlacedPart> parts, bool spreadEvenly)
@@ -40,6 +146,8 @@ public sealed class WorkspaceState
         _parts.AddRange(list);
         Notify();
     }
+
+    private string NextAutoLayerName() => $"Layer {_nextLayerNumber++}";
 
     public void SetSelection(IEnumerable<Guid> ids, bool clearExisting = true)
     {
@@ -206,6 +314,7 @@ public sealed class WorkspaceState
                 LocalMinY = part.LocalBounds.MinY,
                 LocalMaxX = part.LocalBounds.MaxX,
                 LocalMaxY = part.LocalBounds.MaxY,
+                ColorHex = ResolvePartColor(part),
                 Polylines = part.LocalPolylines
                     .Select(poly =>
                     {
@@ -223,6 +332,20 @@ public sealed class WorkspaceState
         }
 
         return scene;
+    }
+
+    private string ResolvePartColor(PlacedPart part)
+    {
+        if (part.LayerId is Guid layerId)
+        {
+            var layer = _layers.FirstOrDefault(l => l.Id == layerId);
+            if (layer is not null)
+            {
+                return layer.ColorHex;
+            }
+        }
+
+        return FallbackStrokeHex;
     }
 
     private void SpreadParts(List<PlacedPart> newParts)

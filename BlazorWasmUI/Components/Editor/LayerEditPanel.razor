@@ -1,0 +1,42 @@
+@namespace BlazorWasmUI.Components.Editor
+@using BlazorWasmUI.Models
+@using BlazorWasmUI.Services
+@inject WorkspaceState Workspace
+@implements IDisposable
+
+<aside class="layer-edit">
+    <div class="layer-edit__title">Layers</div>
+
+    @if (Workspace.Layers.Count == 0)
+    {
+        <div class="layer-edit__empty">No layers yet</div>
+    }
+    else
+    {
+        <ul class="layer-edit__list">
+            @foreach (var layer in Workspace.Layers)
+            {
+                <li class="layer-edit__item">
+                    <span class="layer-edit__swatch" style="background: @layer.ColorHex"></span>
+                    <span class="layer-edit__name" title="@layer.Name">@layer.Name</span>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="layer-edit__add-label">Add layer</div>
+    <div class="layer-edit__palette">
+        @foreach (var color in LayerPalette.Colors)
+        {
+            var used = IsColorUsed(color);
+            <button type="button"
+                    class="layer-edit__palette-btn @(used ? "is-used" : null)"
+                    title="@(used ? $"Already used ({color})" : $"Add layer {color}")"
+                    style="--layer-color: @color"
+                    disabled="@used"
+                    @onclick="() => Add(color)">
+                <span class="layer-edit__palette-swatch"></span>
+            </button>
+        }
+    </div>
+</aside>

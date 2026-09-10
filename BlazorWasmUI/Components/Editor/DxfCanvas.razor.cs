@@ -12,6 +12,7 @@ public partial class DxfCanvas
     private DotNetObjectReference<DxfCanvas>? _self;
     private bool _initialized;
     private bool _pushing;
+    private bool _pushQueued;
 
     protected override void OnInitialized()
     {
@@ -43,16 +44,28 @@ public partial class DxfCanvas
 
     private async Task PushSceneAsync()
     {
-        if (_controller is null || _pushing)
+        if (_controller is null)
         {
+            return;
+        }
+
+        if (_pushing)
+        {
+            // Another push is in flight (e.g. EnsureLayers then AddParts).
+            // Queue a follow-up so the latest workspace state is not dropped.
+            _pushQueued = true;
             return;
         }
 
         _pushing = true;
         try
         {
-            var scene = Workspace.BuildScene();
-            await _controller.InvokeVoidAsync("setScene", scene);
+            do
+            {
+                _pushQueued = false;
+                var scene = Workspace.BuildScene();
+                await _controller.InvokeVoidAsync("setScene", scene);
+            } while (_pushQueued);
         }
         finally
         {
@@ -127,6 +140,19 @@ public partial class DxfCanvas
             var result = ImportService.ImportFromBytes(data, name);
             if (result.Success && result.Part is not null)
             {
+                Guid? dominantLayerId = null;
+                if (result.Layers.Count > 0)
+                {
+                    var ensured = Workspace.EnsureLayers(
+                        result.Layers.Select(l => (l.Name, l.ColorHex)));
+                    dominantLayerId = ensured.Count > 0 ? ensured[0].Id : null;
+                }
+
+                if (dominantLayerId is Guid layerId)
+                {
+                    result.Part.LayerId = layerId;
+                }
+
                 imported.Add(result.Part);
                 if (result.Warnings.Count > 0)
                 {

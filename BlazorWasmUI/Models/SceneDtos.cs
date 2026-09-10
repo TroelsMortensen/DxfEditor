@@ -20,6 +20,7 @@ public sealed class ScenePartDto
     public double LocalMinY { get; set; }
     public double LocalMaxX { get; set; }
     public double LocalMaxY { get; set; }
+    public string? ColorHex { get; set; }
 }
 
 public sealed class ViewportDto

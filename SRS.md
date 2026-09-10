@@ -5,7 +5,7 @@
   A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF ready for Lightburn.
 - **Hosting:**  
   Static deployment via GitHub Pages (Blazor WASM). *(not yet configured)*
-- **Status:** Phases 1–3 complete. Core editor works: import, canvas viewport, select/move/rotate/mirror/delete. Layers, export, and GitHub Pages remain.
+- **Status:** Phases 1–4 (layers/colors) complete except bounding-box readout. Export and GitHub Pages remain.
 
 ## Tech Stack
 
@@ -19,15 +19,15 @@
 - Organize components into logical folders; match file names to component names.
 - Prefer code-behind (`.razor.cs`) over inline `@code` blocks.
 - Prefer local stylesheets (`.razor.css`) over global styles when it makes sense.
-- Current layout: `Models/`, `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`).
+- Current layout: `Models/`, `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`).
 
 ## UI layout
 
 - **Canvas (center):** primary surface for DXF parts; drop target for `.dxf` files; pan/zoom/select/transform.
 - **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), delete. Icons live under `wwwroot/img/`.
-- **Right sidebar:** parts list of imported DXF files; selecting a row selects/highlights the part on the canvas. *(Layer management UI not built yet — Phase 4.)*
+- **Right sidebar:** layer editor (list + add from palette) above parts list; selecting a part row selects/highlights it on the canvas.
 - **Top bar:** app title only for now; export actions reserved for Phase 5.
-- **Bottom bar:** reserved for layer color assignment (Phase 4); not shown yet.
+- **Bottom bar:** layer color buttons; click assigns the current selection to that layer.
 - **Rotate handle:** selection chrome includes a rotate handle using `img/rotate.svg`.
 
 ## Features
@@ -44,9 +44,9 @@
 | 8 | Mirror selection horizontally (toolbar) | Done |
 | 9 | Mirror selection vertically (toolbar) | Done |
 | 10 | Delete selection (toolbar + Delete/Backspace, with confirm) | Done |
-| 11 | Pan (middle-mouse / Space+drag) and wheel zoom | Done |
+| 11 | Pan (middle-mouse / Space+drag, grabbing cursor) and wheel zoom | Done |
 | 12 | Parts list selection sync with canvas | Done |
-| 13 | Layer / color assignment | Not started (Phase 4) |
+| 13 | Layer / color assignment | Done |
 | 14 | Bounding-box / sheet size readout | Not started (Phase 4) |
 | 15 | Master DXF export download | Not started (Phase 5) |
 | 16 | GitHub Pages deploy workflow | Not started (Phase 5) |
@@ -70,11 +70,11 @@
 - Delete selected parts via toolbar button or Delete/Backspace, with confirmation prompt.
 - *(Precise numeric coordinate entry not implemented — deferred.)*
 
-**Phase 4: Layer & Color Assignment** — Not started
-- Layer configuration panel (e.g. Cut = Red, Edge = Blue) in the right sidebar.
-- Assign selected parts to layers; entity colors ByLayer for Lightburn.
-- Bottom toolbar of layer color buttons.
-- Bounding box / nested sheet dimensions readout.
+**Phase 4: Layer & Color Assignment** — Mostly done
+- Layer configuration panel in the right sidebar (list + add from 10 distinct palette colors).
+- Assign selected parts to layers via bottom color bar; canvas strokes use layer color.
+- Import merges source DXF layer colors into the workspace palette; new parts get the dominant layer.
+- Bounding box / nested sheet dimensions readout — not started.
 
 **Phase 5: Master DXF Export & GitHub Pages Deployment** — Not started
 - Combine transformed parts into one master `DxfDocument`.

@@ -1,0 +1,26 @@
+@namespace BlazorWasmUI.Components.Editor
+@using BlazorWasmUI.Services
+@inject WorkspaceState Workspace
+@implements IDisposable
+
+<aside class="layer-bar">
+    @if (Workspace.Layers.Count == 0)
+    {
+        <span class="layer-bar__empty">No layers</span>
+    }
+    else
+    {
+        @foreach (var layer in Workspace.Layers)
+        {
+            var isActive = IsActiveLayer(layer.Id);
+            <button type="button"
+                    class="layer-bar__btn @(isActive ? "is-active" : null)"
+                    title="@layer.Name (@layer.ColorHex)"
+                    style="--layer-color: @layer.ColorHex"
+                    disabled="@(Workspace.SelectedIds.Count == 0)"
+                    @onclick="() => Assign(layer.Id)">
+                <span class="layer-bar__swatch"></span>
+            </button>
+        }
+    }
+</aside>

@@ -278,7 +278,7 @@ export function createCanvasController(canvas, dotNetRef) {
         ctx.lineTo(s.x, s.y);
       }
     }
-    ctx.strokeStyle = selected ? "#f0b429" : "#d7dde5";
+    ctx.strokeStyle = part.colorHex || "#d7dde5";
     ctx.lineWidth = selected ? 2 : 1.25;
     ctx.stroke();
   }
@@ -381,6 +381,7 @@ export function createCanvasController(canvas, dotNetRef) {
         lastY: p.y,
         pointerId: e.pointerId,
       };
+      canvas.style.cursor = "grabbing";
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
       invalidate();
@@ -523,6 +524,7 @@ export function createCanvasController(canvas, dotNetRef) {
 
     if (i.type === "pan") {
       state.interaction = null;
+      canvas.style.cursor = "";
       await commitViewport();
       invalidate();
       return;
@@ -739,6 +741,7 @@ export function createCanvasController(canvas, dotNetRef) {
         localMinY: p.localMinY,
         localMaxX: p.localMaxX,
         localMaxY: p.localMaxY,
+        colorHex: p.colorHex || null,
       }));
       state.selectedIds = new Set(scene.selectedIds || []);
       // Viewport stays JS-authoritative; C# is updated via OnViewportChanged only.

@@ -87,7 +87,8 @@ public sealed class DxfImportService
                         {
                             warnings.Add(
                                 $"Imported '{fileName}' via legacy ASCII fallback parser ({FormatVersion(version)}).");
-                            return BuildImportFromPolylines(fileName, fallbackPolylines, warnings);
+                            var legacyLayers = ParseLegacyAsciiLayers(fallbackText);
+                            return BuildImportFromPolylines(fileName, fallbackPolylines, warnings, legacyLayers);
                         }
 
                         return ImportResult.Fail(
@@ -102,11 +103,16 @@ public sealed class DxfImportService
 
                 var entities = CollectEntities(doc);
                 var polylines = new List<List<Point2>>();
+                var layerTallies = new Dictionary<string, (string Name, string ColorHex, int Count)>(
+                    StringComparer.OrdinalIgnoreCase);
+
+                SeedLayersFromDocument(doc, layerTallies);
 
                 foreach (var entity in entities)
                 {
                     try
                     {
+                        TallyEntityEffectiveColor(entity, layerTallies);
                         AppendEntity(entity, polylines);
                     }
                     catch
@@ -115,7 +121,18 @@ public sealed class DxfImportService
                     }
                 }
 
-                return BuildImportFromPolylines(fileName, polylines, warnings);
+                var importedLayers = layerTallies.Values
+                    .Select(v => new ImportedLayerInfo
+                    {
+                        Name = v.Name,
+                        ColorHex = v.ColorHex,
+                        EntityCount = v.Count,
+                    })
+                    .OrderByDescending(l => l.EntityCount)
+                    .ThenBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return BuildImportFromPolylines(fileName, polylines, warnings, importedLayers);
             }
         }
         catch (Exception ex)
@@ -127,7 +144,8 @@ public sealed class DxfImportService
     private static ImportResult BuildImportFromPolylines(
         string fileName,
         IReadOnlyList<List<Point2>> polylines,
-        List<string> warnings)
+        List<string> warnings,
+        IReadOnlyList<ImportedLayerInfo>? importedLayers = null)
     {
         if (polylines.Count == 0)
         {
@@ -159,8 +177,77 @@ public sealed class DxfImportService
             OffsetY = center.Y,
         };
 
-        return ImportResult.Ok(part, warnings);
+        return ImportResult.Ok(part, warnings, importedLayers);
     }
+
+    private static void SeedLayersFromDocument(
+        DxfDocument doc,
+        Dictionary<string, (string Name, string ColorHex, int Count)> tallies)
+    {
+        foreach (var layer in doc.Layers.Items)
+        {
+            if (layer?.Color is null)
+            {
+                continue;
+            }
+
+            var hex = ToColorHex(layer.Color);
+            var name = string.IsNullOrWhiteSpace(layer.Name) ? "Layer" : layer.Name;
+            EnsureTally(tallies, name, hex, addCount: 0);
+        }
+    }
+
+    private static void TallyEntityEffectiveColor(
+        EntityObject entity,
+        Dictionary<string, (string Name, string ColorHex, int Count)> tallies)
+    {
+        var hex = EffectiveColorHex(entity);
+        if (hex is null)
+        {
+            return;
+        }
+
+        var name = !string.IsNullOrWhiteSpace(entity.Layer?.Name)
+            ? entity.Layer!.Name
+            : "Layer";
+        EnsureTally(tallies, name, hex, addCount: 1);
+    }
+
+    private static string? EffectiveColorHex(EntityObject entity)
+    {
+        var color = entity.Color;
+        if (color is null || color.IsByLayer)
+        {
+            return entity.Layer?.Color is null ? null : ToColorHex(entity.Layer.Color);
+        }
+
+        if (color.IsByBlock)
+        {
+            return entity.Layer?.Color is null ? null : ToColorHex(entity.Layer.Color);
+        }
+
+        return ToColorHex(color);
+    }
+
+    private static void EnsureTally(
+        Dictionary<string, (string Name, string ColorHex, int Count)> tallies,
+        string name,
+        string colorHex,
+        int addCount)
+    {
+        var key = colorHex;
+        if (tallies.TryGetValue(key, out var existing))
+        {
+            tallies[key] = (existing.Name, existing.ColorHex, existing.Count + addCount);
+        }
+        else
+        {
+            tallies[key] = (name, colorHex, addCount);
+        }
+    }
+
+    private static string ToColorHex(AciColor color) =>
+        LayerPalette.FromRgb(color.R, color.G, color.B);
 
     private static MemoryStream UpgradeAcadVersionTo2000(
         Stream source,
@@ -547,6 +634,150 @@ public sealed class DxfImportService
         return polylines;
     }
 
+    /// <summary>
+    /// Parses LAYER table records from ASCII DXF text (name + ACI/true color).
+    /// </summary>
+    private static List<ImportedLayerInfo> ParseLegacyAsciiLayers(string text)
+    {
+        var pairs = ReadDxfPairs(text);
+        var tallies = new Dictionary<string, (string Name, string ColorHex, int Count)>(
+            StringComparer.OrdinalIgnoreCase);
+
+        var inTables = false;
+        var inLayerTable = false;
+        string? pendingName = null;
+        short? pendingAci = null;
+        int? pendingTrueColor = null;
+
+        void FlushLayer()
+        {
+            if (string.IsNullOrWhiteSpace(pendingName))
+            {
+                pendingName = null;
+                pendingAci = null;
+                pendingTrueColor = null;
+                return;
+            }
+
+            string hex;
+            if (pendingTrueColor is int tc)
+            {
+                var aci = AciColor.FromTrueColor(tc);
+                hex = ToColorHex(aci);
+            }
+            else if (pendingAci is short idx && idx >= 1 && idx <= 255)
+            {
+                hex = ToColorHex(AciColor.FromCadIndex(idx));
+            }
+            else
+            {
+                // Default ACI 7 (white) when color omitted.
+                hex = ToColorHex(AciColor.FromCadIndex(7));
+            }
+
+            EnsureTally(tallies, pendingName.Trim(), hex, addCount: 0);
+            pendingName = null;
+            pendingAci = null;
+            pendingTrueColor = null;
+        }
+
+        for (var i = 0; i < pairs.Count; i++)
+        {
+            var (code, value) = pairs[i];
+            var trimmed = value.Trim();
+
+            if (code == 0 && trimmed.Equals("SECTION", StringComparison.OrdinalIgnoreCase))
+            {
+                // Look ahead for section name
+                continue;
+            }
+
+            if (code == 2 && trimmed.Equals("TABLES", StringComparison.OrdinalIgnoreCase))
+            {
+                inTables = true;
+                continue;
+            }
+
+            if (code == 0 && trimmed.Equals("ENDSEC", StringComparison.OrdinalIgnoreCase))
+            {
+                if (inLayerTable)
+                {
+                    FlushLayer();
+                }
+
+                inTables = false;
+                inLayerTable = false;
+                continue;
+            }
+
+            if (!inTables)
+            {
+                continue;
+            }
+
+            if (code == 0 && trimmed.Equals("TABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                FlushLayer();
+                inLayerTable = false;
+                continue;
+            }
+
+            if (code == 2 && inTables && !inLayerTable &&
+                trimmed.Equals("LAYER", StringComparison.OrdinalIgnoreCase))
+            {
+                // Start of LAYER table (table name), not a layer record.
+                inLayerTable = true;
+                continue;
+            }
+
+            if (code == 0 && trimmed.Equals("ENDTAB", StringComparison.OrdinalIgnoreCase))
+            {
+                FlushLayer();
+                inLayerTable = false;
+                continue;
+            }
+
+            if (!inLayerTable)
+            {
+                continue;
+            }
+
+            if (code == 0 && trimmed.Equals("LAYER", StringComparison.OrdinalIgnoreCase))
+            {
+                FlushLayer();
+                continue;
+            }
+
+            if (code == 2 && pendingName is null)
+            {
+                pendingName = trimmed;
+            }
+            else if (code == 62 && short.TryParse(trimmed, out var aci))
+            {
+                // Negative ACI means layer is off; use absolute index for color.
+                var abs = Math.Abs(aci);
+                pendingAci = abs is >= 1 and <= 255 ? (short)abs : aci;
+            }
+            else if (code == 420 && int.TryParse(trimmed, out var trueColor))
+            {
+                pendingTrueColor = trueColor;
+            }
+        }
+
+        FlushLayer();
+
+        return tallies.Values
+            .Select(v => new ImportedLayerInfo
+            {
+                Name = v.Name,
+                ColorHex = v.ColorHex,
+                EntityCount = v.Count,
+            })
+            .OrderByDescending(l => l.EntityCount)
+            .ThenBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static List<(int Code, string Value)> ReadDxfPairs(string text)
     {
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
@@ -828,12 +1059,17 @@ public sealed class ImportResult
     public PlacedPart? Part { get; init; }
     public string? Error { get; init; }
     public IReadOnlyList<string> Warnings { get; init; } = [];
+    public IReadOnlyList<ImportedLayerInfo> Layers { get; init; } = [];
 
-    public static ImportResult Ok(PlacedPart part, IReadOnlyList<string>? warnings = null) => new()
+    public static ImportResult Ok(
+        PlacedPart part,
+        IReadOnlyList<string>? warnings = null,
+        IReadOnlyList<ImportedLayerInfo>? layers = null) => new()
     {
         Success = true,
         Part = part,
         Warnings = warnings ?? [],
+        Layers = layers ?? [],
     };
 
     public static ImportResult Fail(string error, IReadOnlyList<string>? warnings = null) => new()

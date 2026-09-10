@@ -15,6 +15,9 @@ public sealed class PlacedPart
     public double RotationDegrees { get; set; }
     public bool Mirrored { get; set; }
 
+    /// <summary>Workspace layer this part is assigned to (ByLayer color).</summary>
+    public Guid? LayerId { get; set; }
+
     public Point2 TransformLocalToWorld(Point2 local)
     {
         var x = local.X;

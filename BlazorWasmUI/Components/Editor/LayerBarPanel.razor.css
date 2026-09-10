@@ -1,0 +1,52 @@
+.layer-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    height: 100%;
+    box-sizing: border-box;
+    overflow-x: auto;
+}
+
+.layer-bar__empty {
+    color: #6b7380;
+    font-size: 12px;
+}
+
+.layer-bar__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid #3a414d;
+    background: #2a303a;
+    border-radius: 4px;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.layer-bar__swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 3px;
+    background: var(--layer-color, #d7dde5);
+    border: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.layer-bar__btn:hover:not(:disabled) {
+    background: #353c48;
+    border-color: #f0b429;
+}
+
+.layer-bar__btn.is-active {
+    border-color: #f0b429;
+    box-shadow: 0 0 0 1px #f0b429;
+}
+
+.layer-bar__btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}

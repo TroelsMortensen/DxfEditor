@@ -44,6 +44,9 @@
 
 .editor-shell__right {
     border-left-width: 1px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .editor-shell__canvas {
@@ -51,4 +54,11 @@
     min-width: 0;
     min-height: 0;
     background: #1a1d23;
+}
+
+.editor-shell__bottom {
+    flex: 0 0 48px;
+    background: #1a1d23;
+    border-top: 1px solid #2a303a;
+    min-height: 0;
 }
