@@ -2,6 +2,7 @@
 @using BlazorWasmUI.Services
 @inject WorkspaceState Workspace
 @inject DxfImportService ImportService
+@inject DxfExportService ExportService
 @implements IDisposable
 
 <aside class="tools-panel">
@@ -47,5 +48,12 @@
                        multiple
                        style="display: none;" />
         </label>
+        <button type="button"
+                class="tool-btn"
+                title="Export master DXF"
+                disabled="@(Workspace.Parts.Count == 0)"
+                @onclick="ExportAsync">
+            <img src="img/export.svg" alt="" class="tool-icon" />
+        </button>
     </div>
 </aside>

@@ -5,7 +5,7 @@
   A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF ready for Lightburn.
 - **Hosting:**  
   Static deployment via GitHub Pages (Blazor WASM). *(not yet configured)*
-- **Status:** Phases 1–4 (layers/colors) complete except bounding-box readout. Export and GitHub Pages remain.
+- **Status:** Phases 1–4 (layers/colors) complete except bounding-box readout. Master DXF export is done; GitHub Pages remains.
 
 ## Tech Stack
 
@@ -19,15 +19,15 @@
 - Organize components into logical folders; match file names to component names.
 - Prefer code-behind (`.razor.cs`) over inline `@code` blocks.
 - Prefer local stylesheets (`.razor.css`) over global styles when it makes sense.
-- Current layout: `Models/` (`PlacedPart`, `PartEntity`, layers/scene DTOs), `Services/` (`WorkspaceState`, `DxfImportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`, `InfoHelpModal`).
+- Current layout: `Models/` (`PlacedPart`, `PartEntity`, layers/scene DTOs), `Services/` (`WorkspaceState`, `DxfImportService`, `DxfExportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`, `InfoHelpModal`).
 
 ## UI layout
 
 - **Canvas (center):** primary surface for DXF parts; drop target for `.dxf` files; pan/zoom/select/transform.
 - **Info button:** 50×50 overlay at canvas top-left (`img/info.svg`); opens a scrollable help modal describing toolbar, layers, parts list, layer bar, and canvas gestures.
-- **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), duplicate, delete; import at the bottom. Icons live under `wwwroot/img/`.
+- **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), duplicate, delete; import and export at the bottom. Icons live under `wwwroot/img/`.
 - **Right sidebar:** layer editor (list + add from palette) above parts list; selecting a part row selects/highlights it on the canvas.
-- **Top bar:** app title only for now; export actions reserved for Phase 5.
+- **Top bar:** app title only for now.
 - **Bottom bar:** layer color buttons; click assigns the current block or entity selection to that layer.
 - **Rotate handle:** selection chrome includes a rotate handle using `img/rotate.svg`.
 
@@ -49,7 +49,7 @@
 | 12 | Parts list selection sync with canvas (Ctrl/Cmd+click toggle; Shift+click range) | Done |
 | 13 | Layer / color assignment (per block or per entity) | Done |
 | 14 | Bounding-box / sheet size readout | Not started (Phase 4) |
-| 15 | Master DXF export download | Not started (Phase 5) |
+| 15 | Master DXF export download | Done |
 | 16 | GitHub Pages deploy workflow | Not started (Phase 5) |
 | 17 | In-app help modal (info button on canvas) | Done |
 | 18 | Duplicate selection (toolbar offsets ~50px; Ctrl/Cmd+D places at cursor; unique `(n)` names in Parts list) | Done |
@@ -80,7 +80,7 @@
 - Import preserves each entity’s source color into the workspace palette and assigns per-entity layers.
 - Bounding box / nested sheet dimensions readout — not started.
 
-**Phase 5: Master DXF Export & GitHub Pages Deployment** — Not started
+**Phase 5: Master DXF Export & GitHub Pages Deployment** — Export done; Pages not started
 - Combine transformed parts into one master `DxfDocument`.
-- Client-side `.dxf` download.
+- Client-side `.dxf` Save As (File System Access API) with download fallback.
 - GitHub Actions → GitHub Pages for the Blazor WASM publish output.

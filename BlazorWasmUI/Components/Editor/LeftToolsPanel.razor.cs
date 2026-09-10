@@ -2,6 +2,7 @@ using BlazorWasmUI.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
+using System.Text.Json.Serialization;
 
 namespace BlazorWasmUI.Components.Editor;
 
@@ -79,6 +80,55 @@ public partial class LeftToolsPanel : IDisposable
         }
 
         Workspace.DeleteSelection();
+    }
+
+    private async Task ExportAsync()
+    {
+        if (Workspace.Parts.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var bytes = ExportService.ExportToBytes(Workspace.Parts, Workspace.Layers);
+            var result = await Js.InvokeAsync<SaveDxfResult>(
+                "dxfFile.saveDxf",
+                bytes,
+                "layout.dxf");
+
+            if (result.Cancelled)
+            {
+                return;
+            }
+
+            if (!result.Ok)
+            {
+                Workspace.SetStatus(
+                    string.IsNullOrWhiteSpace(result.Error)
+                        ? "Export failed."
+                        : $"Export failed: {result.Error}");
+                return;
+            }
+
+            Workspace.SetStatus("Exported master DXF.");
+        }
+        catch (Exception ex)
+        {
+            Workspace.SetStatus($"Export failed: {ex.Message}");
+        }
+    }
+
+    private sealed class SaveDxfResult
+    {
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+
+        [JsonPropertyName("cancelled")]
+        public bool Cancelled { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
     }
 
     public void Dispose() => Workspace.Changed -= OnChanged;
