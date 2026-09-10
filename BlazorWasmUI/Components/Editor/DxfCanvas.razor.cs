@@ -29,7 +29,8 @@ public partial class DxfCanvas
 
         _initialized = true;
         _self = DotNetObjectReference.Create(this);
-        _module = await Js.InvokeAsync<IJSObjectReference>("import", "./js/dxfCanvas.js");
+        // Cache-bust so wwwroot edits reload (import-map fingerprints can stick in-session).
+        _module = await Js.InvokeAsync<IJSObjectReference>("import", $"./js/dxfCanvas.js?v={DateTime.UtcNow.Ticks}");
         _controller = await _module.InvokeAsync<IJSObjectReference>("createCanvasController", _canvas, _self);
         await PushSceneAsync();
     }
