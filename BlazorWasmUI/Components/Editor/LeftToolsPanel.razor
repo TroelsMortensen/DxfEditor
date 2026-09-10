@@ -1,9 +1,18 @@
 @namespace BlazorWasmUI.Components.Editor
 @using BlazorWasmUI.Services
 @inject WorkspaceState Workspace
+@inject DxfImportService ImportService
 @implements IDisposable
 
 <aside class="tools-panel">
+    <label class="tool-btn" title="Import DXF files">
+        <img src="img/import.svg" alt="" class="tool-icon" />
+        <InputFile @key="_importInputKey"
+                   OnChange="OnFilesSelected"
+                   accept=".dxf"
+                   multiple
+                   style="display: none;" />
+    </label>
     <button type="button"
             class="tool-btn"
             title="Mirror selection horizontally"

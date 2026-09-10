@@ -9,6 +9,7 @@
 }
 
 .tool-btn {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -23,6 +24,7 @@
     font-weight: 700;
     font-size: 14px;
     line-height: 1;
+    box-sizing: border-box;
 }
 
 .tool-icon {

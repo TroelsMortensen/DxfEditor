@@ -1,4 +1,5 @@
 using BlazorWasmUI.Models;
+using BlazorWasmUI.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
@@ -119,66 +120,29 @@ public partial class DxfCanvas
     [JSInvokable]
     public Task OnFilesDropped(DroppedFileDto[] files)
     {
-        var imported = new List<PlacedPart>();
-        var errors = new List<string>();
-        var warnings = new List<string>();
+        var decoded = new List<(string Name, byte[] Data)>();
+        string? decodeError = null;
 
         foreach (var file in files)
         {
             var name = string.IsNullOrWhiteSpace(file.Name) ? "file.dxf" : file.Name;
-            byte[] data;
             try
             {
-                data = Convert.FromBase64String(file.DataBase64);
+                decoded.Add((name, Convert.FromBase64String(file.DataBase64)));
             }
             catch
             {
-                errors.Add($"Could not read '{name}'.");
-                continue;
-            }
-
-            var result = ImportService.ImportFromBytes(data, name);
-            if (result.Success && result.Part is not null)
-            {
-                Guid? dominantLayerId = null;
-                if (result.Layers.Count > 0)
-                {
-                    var ensured = Workspace.EnsureLayers(
-                        result.Layers.Select(l => (l.Name, l.ColorHex)));
-                    dominantLayerId = ensured.Count > 0 ? ensured[0].Id : null;
-                }
-
-                if (dominantLayerId is Guid layerId)
-                {
-                    result.Part.LayerId = layerId;
-                }
-
-                imported.Add(result.Part);
-                if (result.Warnings.Count > 0)
-                {
-                    warnings.AddRange(result.Warnings);
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(result.Error))
-            {
-                errors.Add(result.Error);
+                decodeError ??= $"Could not read '{name}'.";
             }
         }
 
-        if (imported.Count > 0)
+        if (decoded.Count > 0)
         {
-            Workspace.AddParts(imported, spreadEvenly: true);
-            var status = $"Imported {imported.Count} file(s).";
-            if (warnings.Count > 0)
-            {
-                status = $"{status} {warnings[0]}";
-            }
-
-            Workspace.SetStatus(status);
+            DxfBatchImport.ImportFiles(Workspace, ImportService, decoded);
         }
-        else if (errors.Count > 0)
+        else if (decodeError is not null)
         {
-            Workspace.SetStatus(errors[0]);
+            Workspace.SetStatus(decodeError);
         }
 
         return Task.CompletedTask;
