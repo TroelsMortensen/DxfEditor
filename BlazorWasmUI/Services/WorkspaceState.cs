@@ -287,6 +287,22 @@ public sealed class WorkspaceState
         Notify();
     }
 
+    public void ToggleSelection(Guid id)
+    {
+        if (!_parts.Any(p => p.Id == id))
+        {
+            return;
+        }
+
+        _selectedEntityIds.Clear();
+        if (!_selectedPartIds.Add(id))
+        {
+            _selectedPartIds.Remove(id);
+        }
+
+        Notify();
+    }
+
     public void SelectOnly(Guid id)
     {
         _selectedPartIds.Clear();
