@@ -322,11 +322,15 @@ export function createCanvasController(canvas, dotNetRef) {
     const partSelected = state.selectedPartIds.has(part.id);
     for (const ent of part.entities) {
       const entitySelected = state.selectedEntityIds.has(ent.id);
+      const selected = partSelected || entitySelected;
       ctx.beginPath();
       if (!drawEntityPath(part, ent.polyline, overlay)) continue;
       ctx.strokeStyle = ent.colorHex || "#d7dde5";
-      ctx.lineWidth = partSelected || entitySelected ? 2.25 : 1.25;
-      ctx.setLineDash(entitySelected ? [6, 4] : []);
+      ctx.lineWidth = selected ? 2.25 : 1.25;
+      ctx.lineCap = "butt";
+      ctx.lineJoin = "round";
+      // Same dotted highlight for whole-block and single-entity selection.
+      ctx.setLineDash(selected ? [3, 5] : []);
       ctx.stroke();
       ctx.setLineDash([]);
     }
