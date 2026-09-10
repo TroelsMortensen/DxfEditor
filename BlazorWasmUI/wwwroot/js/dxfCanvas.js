@@ -421,7 +421,7 @@ export function createCanvasController(canvas, dotNetRef) {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
-  function beginMoveInteraction(partIds, pointerId, screenX, screenY) {
+  function beginMoveInteraction(partIds, pointerId, screenX, screenY, pendingSingleSelectId = null) {
     const world = screenToWorld(screenX, screenY);
     const base = {};
     const ids = new Set(partIds);
@@ -443,6 +443,7 @@ export function createCanvasController(canvas, dotNetRef) {
       dy: 0,
       pointerId,
       moved: false,
+      pendingSingleSelectId,
     };
     canvas.setPointerCapture(pointerId);
   }
@@ -532,12 +533,23 @@ export function createCanvasController(canvas, dotNetRef) {
         }
       } else {
         // Plain click: select entire block.
+        // Unselected hit → select only that part immediately.
+        // Already selected → keep multi-selection for drag; narrow on pointerup if no drag.
         state.selectedEntityIds = new Set();
-        if (!state.selectedPartIds.has(hit.partId) || state.selectedPartIds.size !== 1) {
+        let pendingSingleSelectId = null;
+        if (!state.selectedPartIds.has(hit.partId)) {
           state.selectedPartIds = new Set([hit.partId]);
           commitSelection();
+        } else if (state.selectedPartIds.size > 1) {
+          pendingSingleSelectId = hit.partId;
         }
-        beginMoveInteraction(state.selectedPartIds, e.pointerId, p.x, p.y);
+        beginMoveInteraction(
+          state.selectedPartIds,
+          e.pointerId,
+          p.x,
+          p.y,
+          pendingSingleSelectId
+        );
       }
 
       e.preventDefault();
@@ -649,8 +661,16 @@ export function createCanvasController(canvas, dotNetRef) {
         updateHoverCursor(p.x, p.y);
         await dotNetRef.invokeMethodAsync("OnPartsTransformed", transforms);
       } else {
-        state.interaction = null;
-        updateHoverCursor(p.x, p.y);
+        if (i.pendingSingleSelectId != null) {
+          state.selectedPartIds = new Set([i.pendingSingleSelectId]);
+          state.selectedEntityIds = new Set();
+          state.interaction = null;
+          updateHoverCursor(p.x, p.y);
+          await commitSelection();
+        } else {
+          state.interaction = null;
+          updateHoverCursor(p.x, p.y);
+        }
       }
       invalidate();
       return;
