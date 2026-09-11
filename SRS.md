@@ -2,7 +2,7 @@
 
 - **Name:** Dxf Editor
 - **Purpose:**  
-  A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF ready for Lightburn.
+  A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF (one BLOCK+INSERT per part) ready for LightBurn and for re-import as separate repositionable parts.
 - **Hosting:**  
   Static deployment via GitHub Pages (Blazor WASM).
 - **Status:** Phases 1–5 complete (layers/colors, master DXF export, GitHub Pages), including workspace bounding-box overlay (Phase 4.5). Remaining: Phase 6 backlog (export origin, undo/redo, rename, SVG import).
@@ -49,7 +49,7 @@
 | 12 | Parts list selection sync with canvas (Ctrl/Cmd+click toggle; Shift+click range) | Done |
 | 13 | Layer / color assignment (per block or per entity) | Done |
 | 14 | Workspace bounding box: thin grey outline around all parts, with width×height in mm | Done |
-| 15 | Master DXF export download | Done |
+| 15 | Master DXF export (BLOCK+INSERT per part) with round-trip re-import | Done |
 | 16 | GitHub Pages deploy workflow | Done |
 | 17 | In-app help modal (info button on canvas) | Done |
 | 18 | Duplicate selection (toolbar offsets ~50px; Ctrl/Cmd+D places at cursor; unique `(n)` names in Parts list) | Done |
@@ -63,7 +63,7 @@
 **Phase 1: Project Initialization & File Ingestion** — Done
 - Blazor WASM project + netDxf package.
 - Canvas dropzone for multiple `.dxf` files (JS `File` → base64 → C# `MemoryStream`).
-- Parse into geometry; explode inserts/blocks; normalize part origin to local bbox center.
+- Parse into geometry; top-level `INSERT`s become separate parts (nested inserts exploded); flat files (no inserts) remain one part; normalize part origin to local bbox center.
 - R14 / pre-2000 ASCII support via header upgrade + legacy entity fallback.
 
 **Phase 2: The 2D Canvas Viewport & State Management** — Done
@@ -89,9 +89,11 @@
 - No fixed “sheet stock” frame for now—this is a readout of the nested layout extent, not a material template.
 
 **Phase 5: Master DXF Export & GitHub Pages Deployment** — Done
-- Combine transformed parts into one master `DxfDocument`.
+- Export each placed part as a named `BLOCK` (local geometry) plus `INSERT` (offset, rotation, mirror via negative X scale) in one master `DxfDocument`.
+- Re-importing that master restores separate repositionable parts and layer colors; already-flattened DXFs (no inserts) still import as one part per file.
 - Client-side `.dxf` Save As (File System Access API) with download fallback.
 - GitHub Actions → GitHub Pages for the Blazor WASM publish output.
+- *LightBurn acceptance of block-structured masters is unverified on this branch; flatten export can be restored if needed.*
 
 **Phase 6: Backlog** — Not started
 - **Export origin normalization:** Investigate how LightBurn places a DXF whose geometry sits far from the origin (e.g. all parts off to one side). If LightBurn does not auto-center usefully, normalize on export (e.g. shift so the workspace bbox min or center maps to a predictable origin). Document the chosen behavior.

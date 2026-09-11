@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using BlazorWasmUI.Models;
 using netDxf;
+using netDxf.Blocks;
 using netDxf.Entities;
 using netDxf.Header;
 
@@ -104,47 +105,7 @@ public sealed class DxfImportService
                     return ImportResult.Fail($"Failed to parse '{fileName}'.", warnings);
                 }
 
-                var entities = CollectEntities(doc);
-                var geometry = new List<ImportedGeom>();
-                var layerTallies = new Dictionary<string, (string Name, string ColorHex, int Count)>(
-                    StringComparer.OrdinalIgnoreCase);
-
-                SeedLayersFromDocument(doc, layerTallies);
-
-                foreach (var entity in entities)
-                {
-                    try
-                    {
-                        TallyEntityEffectiveColor(entity, layerTallies);
-                        var batch = new List<List<Point2>>();
-                        AppendEntity(entity, batch);
-                        var hex = EffectiveColorHex(entity);
-                        foreach (var poly in batch)
-                        {
-                            geometry.Add(new ImportedGeom { Points = poly, ColorHex = hex });
-                        }
-                    }
-                    catch
-                    {
-                        warnings.Add($"Skipped unsupported entity in '{fileName}'.");
-                    }
-                }
-
-                var importedLayers = layerTallies.Values
-                    // Skip unused table layers (e.g. default Layer 0) so they do not
-                    // pollute the workspace palette when no entity uses that color.
-                    .Where(v => v.Count > 0)
-                    .Select(v => new ImportedLayerInfo
-                    {
-                        Name = v.Name,
-                        ColorHex = v.ColorHex,
-                        EntityCount = v.Count,
-                    })
-                    .OrderByDescending(l => l.EntityCount)
-                    .ThenBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                return BuildImportFromGeometry(fileName, geometry, warnings, importedLayers);
+                return BuildImportFromDocument(doc, fileName, warnings);
             }
         }
         catch (Exception ex)
@@ -159,6 +120,239 @@ public sealed class DxfImportService
         public string? ColorHex { get; init; }
     }
 
+    private ImportResult BuildImportFromDocument(
+        DxfDocument doc,
+        string fileName,
+        List<string> warnings)
+    {
+        var layerTallies = new Dictionary<string, (string Name, string ColorHex, int Count)>(
+            StringComparer.OrdinalIgnoreCase);
+        SeedLayersFromDocument(doc, layerTallies);
+
+        var inserts = new List<Insert>();
+        var looseEntities = new List<EntityObject>();
+
+        foreach (var entity in doc.Entities.All)
+        {
+            if (entity is Insert insert)
+            {
+                inserts.Add(insert);
+            }
+            else
+            {
+                looseEntities.Add(entity);
+            }
+        }
+
+        var parts = new List<PlacedPart>();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < inserts.Count; i++)
+        {
+            var insert = inserts[i];
+            try
+            {
+                var part = BuildPartFromInsert(insert, fileName, i, usedNames, layerTallies, warnings);
+                if (part is not null)
+                {
+                    parts.Add(part);
+                }
+            }
+            catch
+            {
+                warnings.Add($"Skipped unsupported insert in '{fileName}'.");
+            }
+        }
+
+        if (looseEntities.Count > 0 || inserts.Count == 0)
+        {
+            var entities = inserts.Count == 0
+                ? CollectEntities(doc)
+                : ExplodeNestedInserts(looseEntities);
+
+            var geometry = ConvertEntitiesToGeometry(entities, fileName, layerTallies, warnings);
+            if (geometry.Count > 0)
+            {
+                var looseName = inserts.Count == 0
+                    ? fileName
+                    : AllocatePartName(Path.GetFileNameWithoutExtension(fileName) + "_loose", usedNames);
+                parts.Add(BuildPartFromGeometry(looseName, geometry));
+            }
+        }
+
+        if (parts.Count == 0)
+        {
+            return ImportResult.Fail($"No drawable geometry found in '{fileName}'.", warnings);
+        }
+
+        var importedLayers = BuildImportedLayers(layerTallies);
+        var preserveLayout = inserts.Count > 0;
+        return ImportResult.Ok(parts, warnings, importedLayers, preserveLayout);
+    }
+
+    private static PlacedPart? BuildPartFromInsert(
+        Insert insert,
+        string fileName,
+        int index,
+        HashSet<string> usedNames,
+        Dictionary<string, (string Name, string ColorHex, int Count)> layerTallies,
+        List<string> warnings)
+    {
+        var block = insert.Block;
+        if (block is null)
+        {
+            return null;
+        }
+
+        var blockEntities = ExplodeNestedInserts(block.Entities);
+        var geometry = ConvertEntitiesToGeometry(blockEntities, fileName, layerTallies, warnings);
+        if (geometry.Count == 0)
+        {
+            return null;
+        }
+
+        var scaleX = insert.Scale.X;
+        var scaleY = insert.Scale.Y;
+        var absX = Math.Abs(scaleX);
+        var absY = Math.Abs(scaleY);
+        if (absX < 1e-12)
+        {
+            absX = 1.0;
+        }
+
+        if (absY < 1e-12)
+        {
+            absY = 1.0;
+        }
+
+        // Bake non-unit absolute scale into local geometry; keep sign as Mirrored.
+        if (Math.Abs(absX - 1.0) > 1e-9 || Math.Abs(absY - 1.0) > 1e-9)
+        {
+            geometry = geometry
+                .Select(g => new ImportedGeom
+                {
+                    Points = g.Points.Select(p => new Point2(p.X * absX, p.Y * absY)).ToList(),
+                    ColorHex = g.ColorHex,
+                })
+                .ToList();
+        }
+
+        var mirrored = scaleX < 0;
+        var rotation = insert.Rotation;
+        var posX = insert.Position.X;
+        var posY = insert.Position.Y;
+
+        var allPoints = geometry.SelectMany(g => g.Points).ToList();
+        var bounds = Bounds2.FromPoints(allPoints);
+        var center = bounds.Center;
+
+        // World pose of the recentered local origin (block origin → insert transform → center).
+        var lx = mirrored ? -center.X : center.X;
+        var ly = center.Y;
+        var rad = rotation * Math.PI / 180.0;
+        var cos = Math.Cos(rad);
+        var sin = Math.Sin(rad);
+        var offsetX = lx * cos - ly * sin + posX;
+        var offsetY = lx * sin + ly * cos + posY;
+
+        var entities = geometry
+            .Select(g => new PartEntity
+            {
+                Polyline = g.Points
+                    .Select(p => new Point2(p.X - center.X, p.Y - center.Y))
+                    .ToList(),
+                SourceColorHex = g.ColorHex is null
+                    ? null
+                    : LayerPalette.NormalizeHex(g.ColorHex),
+            })
+            .ToList();
+
+        var localBounds = new Bounds2(
+            bounds.MinX - center.X,
+            bounds.MinY - center.Y,
+            bounds.MaxX - center.X,
+            bounds.MaxY - center.Y);
+
+        var baseName = !string.IsNullOrWhiteSpace(block.Name) && !block.IsForInternalUseOnly
+            ? block.Name
+            : $"{Path.GetFileNameWithoutExtension(fileName)}_{index + 1}";
+        var name = AllocatePartName(baseName, usedNames);
+
+        return new PlacedPart
+        {
+            Name = name,
+            Entities = entities,
+            LocalBounds = localBounds,
+            OffsetX = offsetX,
+            OffsetY = offsetY,
+            RotationDegrees = rotation,
+            Mirrored = mirrored,
+        };
+    }
+
+    private static List<ImportedGeom> ConvertEntitiesToGeometry(
+        IEnumerable<EntityObject> entities,
+        string fileName,
+        Dictionary<string, (string Name, string ColorHex, int Count)> layerTallies,
+        List<string> warnings)
+    {
+        var geometry = new List<ImportedGeom>();
+        foreach (var entity in entities)
+        {
+            try
+            {
+                TallyEntityEffectiveColor(entity, layerTallies);
+                var batch = new List<List<Point2>>();
+                AppendEntity(entity, batch);
+                var hex = EffectiveColorHex(entity);
+                foreach (var poly in batch)
+                {
+                    geometry.Add(new ImportedGeom { Points = poly, ColorHex = hex });
+                }
+            }
+            catch
+            {
+                warnings.Add($"Skipped unsupported entity in '{fileName}'.");
+            }
+        }
+
+        return geometry;
+    }
+
+    private static List<ImportedLayerInfo> BuildImportedLayers(
+        Dictionary<string, (string Name, string ColorHex, int Count)> layerTallies) =>
+        layerTallies.Values
+            // Skip unused table layers (e.g. default Layer 0) so they do not
+            // pollute the workspace palette when no entity uses that color.
+            .Where(v => v.Count > 0)
+            .Select(v => new ImportedLayerInfo
+            {
+                Name = v.Name,
+                ColorHex = v.ColorHex,
+                EntityCount = v.Count,
+            })
+            .OrderByDescending(l => l.EntityCount)
+            .ThenBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static string AllocatePartName(string baseName, HashSet<string> used)
+    {
+        var name = string.IsNullOrWhiteSpace(baseName) ? "Part" : baseName.Trim();
+        if (used.Add(name))
+        {
+            return name;
+        }
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{name}_{i}";
+            if (used.Add(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
     private static ImportResult BuildImportFromGeometry(
         string fileName,
         IReadOnlyList<ImportedGeom> geometry,
@@ -170,6 +364,14 @@ public sealed class DxfImportService
             return ImportResult.Fail($"No drawable geometry found in '{fileName}'.", warnings);
         }
 
+        var part = BuildPartFromGeometry(fileName, geometry);
+        return ImportResult.Ok([part], warnings, importedLayers, preserveWorldLayout: false);
+    }
+
+    private static PlacedPart BuildPartFromGeometry(
+        string name,
+        IReadOnlyList<ImportedGeom> geometry)
+    {
         var allPoints = geometry.SelectMany(g => g.Points);
         var bounds = Bounds2.FromPoints(allPoints);
         var center = bounds.Center;
@@ -192,16 +394,14 @@ public sealed class DxfImportService
             bounds.MaxX - center.X,
             bounds.MaxY - center.Y);
 
-        var part = new PlacedPart
+        return new PlacedPart
         {
-            Name = fileName,
+            Name = name,
             Entities = entities,
             LocalBounds = localBounds,
             OffsetX = center.X,
             OffsetY = center.Y,
         };
-
-        return ImportResult.Ok(part, warnings, importedLayers);
     }
 
     private static void SeedLayersFromDocument(
@@ -854,7 +1054,16 @@ public sealed class DxfImportService
             }
         }
 
-        // Explode nested inserts once more if needed.
+        return ExplodeNestedInserts(result);
+    }
+
+    /// <summary>
+    /// Explodes nested <see cref="Insert"/> entities in place while leaving geometry
+    /// in the coordinate space of the parent block / list (no top-level insert transform).
+    /// </summary>
+    private static List<EntityObject> ExplodeNestedInserts(IEnumerable<EntityObject> entities)
+    {
+        var result = entities.ToList();
         for (var i = 0; i < result.Count; i++)
         {
             if (result[i] is Insert nested)
@@ -1081,20 +1290,29 @@ public sealed class DxfImportService
 public sealed class ImportResult
 {
     public bool Success { get; init; }
-    public PlacedPart? Part { get; init; }
+    public IReadOnlyList<PlacedPart> Parts { get; init; } = [];
+    public PlacedPart? Part => Parts.Count > 0 ? Parts[0] : null;
     public string? Error { get; init; }
     public IReadOnlyList<string> Warnings { get; init; } = [];
     public IReadOnlyList<ImportedLayerInfo> Layers { get; init; } = [];
 
+    /// <summary>
+    /// True when parts came from top-level INSERTs and already have world poses
+    /// (do not grid-spread on add).
+    /// </summary>
+    public bool PreserveWorldLayout { get; init; }
+
     public static ImportResult Ok(
-        PlacedPart part,
+        IReadOnlyList<PlacedPart> parts,
         IReadOnlyList<string>? warnings = null,
-        IReadOnlyList<ImportedLayerInfo>? layers = null) => new()
+        IReadOnlyList<ImportedLayerInfo>? layers = null,
+        bool preserveWorldLayout = false) => new()
     {
         Success = true,
-        Part = part,
+        Parts = parts,
         Warnings = warnings ?? [],
         Layers = layers ?? [],
+        PreserveWorldLayout = preserveWorldLayout,
     };
 
     public static ImportResult Fail(string error, IReadOnlyList<string>? warnings = null) => new()
