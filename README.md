@@ -15,8 +15,9 @@ Everything runs in the browser (Blazor WebAssembly)—uploads are processed loca
 - Block and entity selection (including Shift multi-select and marquee)
 - Layer and color assignment for whole parts or individual entities
 - Export a combined master `.dxf` (Save As when supported, otherwise download)
+- Workspace bounding box overlay with live width × height in mm
 
-Planned: bounding-box / sheet size readout, and GitHub Pages hosting.
+Hosted on GitHub Pages (see link above).
 
 ## User guide
 
@@ -66,6 +67,7 @@ This top left button opens a modal with information about the app, the features,
 - **Select entities** — hold Ctrl (or Cmd on Mac) and click to select individual lines/arcs/circles inside a block for layer and color assignment.
 - **Move** — drag a selection to reposition it (click-drag on a line of the selection). The rotate handle above the selection rotates the parent block(s).
 - **Duplicate** — press Ctrl+D (Cmd+D on Mac) to copy the selected block(s) with the selection’s bounding-box center at the mouse cursor.
+- **Layout size** — a thin grey outline around all parts shows the total nested extent, with width × height in mm below the box.
 - **Clear selection** — click empty canvas or press Escape.
 
 <img src="docs/images/canvas.png" alt="PLACEHOLDER: Canvas — parts, selection chrome, rotate handle"/>

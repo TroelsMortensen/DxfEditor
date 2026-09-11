@@ -5,7 +5,7 @@
   A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF ready for Lightburn.
 - **Hosting:**  
   Static deployment via GitHub Pages (Blazor WASM).
-- **Status:** Phases 1–5 complete (layers/colors, master DXF export, GitHub Pages). Remaining: bounding-box overlay (Phase 4.5), plus Phase 6 backlog (export origin, undo/redo, rename, SVG import).
+- **Status:** Phases 1–5 complete (layers/colors, master DXF export, GitHub Pages), including workspace bounding-box overlay (Phase 4.5). Remaining: Phase 6 backlog (export origin, undo/redo, rename, SVG import).
 
 ## Tech Stack
 
@@ -48,7 +48,7 @@
 | 11 | Pan (middle-mouse / Space+drag, grabbing cursor) and wheel zoom | Done |
 | 12 | Parts list selection sync with canvas (Ctrl/Cmd+click toggle; Shift+click range) | Done |
 | 13 | Layer / color assignment (per block or per entity) | Done |
-| 14 | Workspace bounding box: thin grey outline around all parts, with width×height in mm | Not started (Phase 4.5) |
+| 14 | Workspace bounding box: thin grey outline around all parts, with width×height in mm | Done |
 | 15 | Master DXF export download | Done |
 | 16 | GitHub Pages deploy workflow | Done |
 | 17 | In-app help modal (info button on canvas) | Done |
@@ -83,7 +83,7 @@
 - Bottom color bar assigns selected blocks (all entities) or selected entities to a layer; strokes use per-entity layer color.
 - Import preserves each entity’s source color into the workspace palette and assigns per-entity layers.
 
-**Phase 4.5: Workspace Bounding Box Overlay** — Not started
+**Phase 4.5: Workspace Bounding Box Overlay** — Done
 - Draw a thin grey axis-aligned bounding box around all parts currently on the canvas (union of world-space part bounds).
 - Show dimensions in mm (width × height) on or near the box; update live as parts move, rotate, mirror, duplicate, delete, or import.
 - No fixed “sheet stock” frame for now—this is a readout of the nested layout extent, not a material template.

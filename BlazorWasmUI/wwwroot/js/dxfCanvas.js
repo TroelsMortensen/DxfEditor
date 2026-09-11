@@ -183,6 +183,22 @@ export function createCanvasController(canvas, dotNetRef) {
     return any ? { minX, minY, maxX, maxY } : null;
   }
 
+  function workspaceWorldBounds() {
+    if (state.parts.length === 0) return null;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const part of state.parts) {
+      const b = partWorldBounds(part, getTransientOverlay(part.id));
+      minX = Math.min(minX, b.minX);
+      minY = Math.min(minY, b.minY);
+      maxX = Math.max(maxX, b.maxX);
+      maxY = Math.max(maxY, b.maxY);
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
   function selectionCentroid() {
     const b = selectionWorldBounds();
     if (!b) return null;
@@ -337,6 +353,35 @@ export function createCanvasController(canvas, dotNetRef) {
     }
   }
 
+  function drawWorkspaceBounds() {
+    const b = workspaceWorldBounds();
+    if (!b) return;
+    const tl = worldToScreen(b.minX, b.maxY);
+    const br = worldToScreen(b.maxX, b.minY);
+    const x = Math.min(tl.x, br.x);
+    const y = Math.min(tl.y, br.y);
+    const w = Math.abs(br.x - tl.x);
+    const h = Math.abs(br.y - tl.y);
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(160,168,180,0.7)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.strokeRect(x, y, w, h);
+
+    const worldW = b.maxX - b.minX;
+    const worldH = b.maxY - b.minY;
+    const label = `${worldW.toFixed(1)} × ${worldH.toFixed(1)} mm`;
+    const labelX = x + w * 0.5;
+    const labelY = y + h + 16;
+    ctx.font = "12px Segoe UI, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "rgba(160,168,180,0.95)";
+    ctx.fillText(label, labelX, labelY);
+    ctx.restore();
+  }
+
   function drawSelectionChrome() {
     const b = selectionWorldBounds();
     if (!b) return;
@@ -405,6 +450,7 @@ export function createCanvasController(canvas, dotNetRef) {
     for (const part of state.parts) {
       drawPart(part);
     }
+    drawWorkspaceBounds();
     drawSelectionChrome();
     drawMarquee();
 
