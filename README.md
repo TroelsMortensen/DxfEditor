@@ -16,8 +16,6 @@ Planned: bounding-box / sheet size readout, and GitHub Pages hosting.
 
 ## User guide
 
-### UI overview
-
 The editor layout:
 
 - **Top bar** — app title
