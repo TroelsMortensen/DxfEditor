@@ -1,3 +1,7 @@
+# Hosting on GitHub Pages
+
+The app is hosted on GitHub Pages. You can access it [here](https://troelsmortensen.github.io/DxfEditor/).
+
 # Dxf Editor
 
 A lightweight, client-side web utility for preparing DXF parts for LightBurn. Import multiple individual DXF part files, arrange and nest them on a canvas, assign layers/colors, then export a single master DXF.
@@ -107,3 +111,6 @@ Or, as soon as the app is hosted on GitHub Pages, I will provide a link to the a
 ## More detail
 
 Requirements, architecture notes, and phase status are in [SRS.md](SRS.md).
+
+## Sources
+Most icons are from [svgrepo](https://www.svgrepo.com/).
