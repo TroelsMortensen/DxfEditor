@@ -76,10 +76,30 @@ public static class DxfBatchImport
         PlacedPart part,
         IReadOnlyList<ImportedLayerInfo> importedLayers)
     {
-        var ensureList = new List<(string Name, string ColorHex)>();
-        if (importedLayers.Count > 0)
+        // Snap to LightBurn RGB; merge entries that collapse to the same color.
+        // Prefer a real imported layer name over the generic "Layer" placeholder.
+        var bySnappedHex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        void OfferLayer(string name, string colorHex)
         {
-            ensureList.AddRange(importedLayers.Select(l => (l.Name, l.ColorHex)));
+            var snapped = LayerPalette.NearestLightBurnHex(colorHex);
+            if (bySnappedHex.TryGetValue(snapped, out var existingName))
+            {
+                if (string.Equals(existingName, "Layer", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(name, "Layer", StringComparison.OrdinalIgnoreCase))
+                {
+                    bySnappedHex[snapped] = name;
+                }
+
+                return;
+            }
+
+            bySnappedHex[snapped] = string.IsNullOrWhiteSpace(name) ? "Layer" : name.Trim();
+        }
+
+        foreach (var layer in importedLayers)
+        {
+            OfferLayer(layer.Name, layer.ColorHex);
         }
 
         foreach (var entity in part.Entities)
@@ -89,20 +109,15 @@ public static class DxfBatchImport
                 continue;
             }
 
-            var hex = LayerPalette.NormalizeHex(entity.SourceColorHex);
-            if (ensureList.All(l =>
-                    !string.Equals(LayerPalette.NormalizeHex(l.ColorHex), hex, StringComparison.OrdinalIgnoreCase)))
-            {
-                ensureList.Add(("Layer", hex));
-            }
+            OfferLayer("Layer", entity.SourceColorHex);
         }
 
-        if (ensureList.Count > 0)
+        if (bySnappedHex.Count > 0)
         {
-            workspace.EnsureLayers(ensureList);
+            workspace.EnsureLayers(bySnappedHex.Select(kv => (kv.Value, kv.Key)));
         }
 
-        var byHex = workspace.Layers.ToDictionary(
+        var layerIdByHex = workspace.Layers.ToDictionary(
             l => l.ColorHex,
             l => l.Id,
             StringComparer.OrdinalIgnoreCase);
@@ -111,8 +126,8 @@ public static class DxfBatchImport
         {
             if (!string.IsNullOrWhiteSpace(entity.SourceColorHex))
             {
-                var hex = LayerPalette.NormalizeHex(entity.SourceColorHex);
-                if (byHex.TryGetValue(hex, out var layerId))
+                var snapped = LayerPalette.NearestLightBurnHex(entity.SourceColorHex);
+                if (layerIdByHex.TryGetValue(snapped, out var layerId))
                 {
                     entity.LayerId = layerId;
                 }

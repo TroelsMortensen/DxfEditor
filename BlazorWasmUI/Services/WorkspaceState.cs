@@ -5,7 +5,7 @@ namespace BlazorWasmUI.Services;
 
 public sealed class WorkspaceState
 {
-    private const string FallbackStrokeHex = "#d7dde5";
+    private const string FallbackStrokeHex = "#000000";
 
     private readonly List<PlacedPart> _parts = [];
     private readonly List<LayerDefinition> _layers = [];

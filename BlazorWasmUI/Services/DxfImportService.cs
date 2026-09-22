@@ -83,15 +83,16 @@ public sealed class DxfImportService
                             bufferSize: 1024,
                             leaveOpen: true);
                         var fallbackText = fallbackReader.ReadToEnd();
-                        var fallbackPolylines = ParseLegacyAsciiPolylines(fallbackText);
-                        if (fallbackPolylines.Count > 0)
+                        var legacyLayers = ParseLegacyAsciiLayers(fallbackText);
+                        var layerColors = legacyLayers.ToDictionary(
+                            l => l.Name,
+                            l => l.ColorHex,
+                            StringComparer.OrdinalIgnoreCase);
+                        var legacyGeom = ParseLegacyAsciiPolylines(fallbackText, layerColors);
+                        if (legacyGeom.Count > 0)
                         {
                             warnings.Add(
                                 $"Imported '{fileName}' via legacy ASCII fallback parser ({FormatVersion(version)}).");
-                            var legacyLayers = ParseLegacyAsciiLayers(fallbackText);
-                            var legacyGeom = fallbackPolylines
-                                .Select(p => new ImportedGeom { Points = p, ColorHex = null })
-                                .ToList();
                             return BuildImportFromGeometry(fileName, legacyGeom, warnings, legacyLayers);
                         }
 
@@ -572,10 +573,12 @@ public sealed class DxfImportService
         return dxfText;
     }
 
-    private static List<List<Point2>> ParseLegacyAsciiPolylines(string text)
+    private static List<ImportedGeom> ParseLegacyAsciiPolylines(
+        string text,
+        IReadOnlyDictionary<string, string> layerColorsByName)
     {
         var pairs = ReadDxfPairs(text);
-        var polylines = new List<List<Point2>>();
+        var polylines = new List<ImportedGeom>();
 
         var inEntities = false;
         var currentEntity = string.Empty;
@@ -585,18 +588,36 @@ public sealed class DxfImportService
         Dictionary<int, string>? vertexEntity = null;
         double? pendingX = null;
 
+        void AddPolyline(List<Point2> points, IReadOnlyDictionary<int, string> colorData)
+        {
+            if (points.Count < 2)
+            {
+                return;
+            }
+
+            polylines.Add(new ImportedGeom
+            {
+                Points = points,
+                ColorHex = ResolveLegacyEntityColorHex(colorData, layerColorsByName),
+            });
+        }
+
         static void FinalizeEntity(
             string entityName,
             Dictionary<int, string> data,
             List<(Point2 Point, double Bulge)>? lwVertices,
             bool lwClosed,
-            List<List<Point2>> outPolylines)
+            Action<List<Point2>, IReadOnlyDictionary<int, string>> addPolyline)
         {
             if (entityName.Equals("LWPOLYLINE", StringComparison.OrdinalIgnoreCase))
             {
                 if (lwVertices is { Count: > 0 })
                 {
-                    FinalizeLegacyPolyline(lwVertices, lwClosed, outPolylines);
+                    var points = BuildLegacyPolylinePoints(lwVertices, lwClosed);
+                    if (points is not null)
+                    {
+                        addPolyline(points, data);
+                    }
                 }
 
                 return;
@@ -611,7 +632,7 @@ public sealed class DxfImportService
                         TryGetDouble(data, 11, out var x2) &&
                         TryGetDouble(data, 21, out var y2))
                     {
-                        outPolylines.Add([new Point2(x1, y1), new Point2(x2, y2)]);
+                        addPolyline([new Point2(x1, y1), new Point2(x2, y2)], data);
                     }
                     break;
                 }
@@ -621,7 +642,7 @@ public sealed class DxfImportService
                         TryGetDouble(data, 20, out var cy) &&
                         TryGetDouble(data, 40, out var r))
                     {
-                        outPolylines.Add(TessellateArc(cx, cy, r, 0, 360, closed: true));
+                        addPolyline(TessellateArc(cx, cy, r, 0, 360, closed: true), data);
                     }
                     break;
                 }
@@ -633,56 +654,10 @@ public sealed class DxfImportService
                         TryGetDouble(data, 50, out var a0) &&
                         TryGetDouble(data, 51, out var a1))
                     {
-                        outPolylines.Add(TessellateArc(cx, cy, r, a0, a1, closed: false));
+                        addPolyline(TessellateArc(cx, cy, r, a0, a1, closed: false), data);
                     }
                     break;
                 }
-            }
-        }
-
-        static void FinalizeLegacyPolyline(
-            List<(Point2 Point, double Bulge)> vertices,
-            bool isClosed,
-            List<List<Point2>> outPolylines)
-        {
-            if (vertices.Count < 2)
-            {
-                return;
-            }
-
-            var points = new List<Point2>();
-            for (var i = 0; i < vertices.Count; i++)
-            {
-                var next = i + 1;
-                if (next >= vertices.Count)
-                {
-                    if (!isClosed)
-                    {
-                        break;
-                    }
-                    next = 0;
-                }
-
-                var current = vertices[i];
-                var end = vertices[next];
-                if (points.Count == 0)
-                {
-                    points.Add(current.Point);
-                }
-
-                if (Math.Abs(current.Bulge) < 1e-12)
-                {
-                    points.Add(end.Point);
-                }
-                else
-                {
-                    points.AddRange(TessellateBulge(current.Point, end.Point, current.Bulge).Skip(1));
-                }
-            }
-
-            if (points.Count >= 2)
-            {
-                outPolylines.Add(points);
             }
         }
 
@@ -700,7 +675,7 @@ public sealed class DxfImportService
                 return;
             }
 
-            FinalizeEntity(currentEntity, entity, polylineVertices, polylineClosed, polylines);
+            FinalizeEntity(currentEntity, entity, polylineVertices, polylineClosed, AddPolyline);
             entity = new Dictionary<int, string>();
             if (currentEntity.Equals("LWPOLYLINE", StringComparison.OrdinalIgnoreCase))
             {
@@ -734,7 +709,11 @@ public sealed class DxfImportService
                 if (polylineVertices is { Count: > 0 } &&
                     currentEntity.Equals("POLYLINE", StringComparison.OrdinalIgnoreCase))
                 {
-                    FinalizeLegacyPolyline(polylineVertices, polylineClosed, polylines);
+                    var points = BuildLegacyPolylinePoints(polylineVertices, polylineClosed);
+                    if (points is not null)
+                    {
+                        AddPolyline(points, entity);
+                    }
                 }
                 break;
             }
@@ -751,6 +730,7 @@ public sealed class DxfImportService
                     vertexEntity = null;
                     pendingX = null;
                     currentEntity = value;
+                    entity = new Dictionary<int, string>();
                     continue;
                 }
 
@@ -765,7 +745,11 @@ public sealed class DxfImportService
                 {
                     if (polylineVertices is { Count: > 0 })
                     {
-                        FinalizeLegacyPolyline(polylineVertices, polylineClosed, polylines);
+                        var points = BuildLegacyPolylinePoints(polylineVertices, polylineClosed);
+                        if (points is not null)
+                        {
+                            AddPolyline(points, entity);
+                        }
                     }
                     polylineVertices = null;
                     vertexEntity = null;
@@ -775,6 +759,7 @@ public sealed class DxfImportService
                 }
 
                 currentEntity = value;
+                entity = new Dictionary<int, string>();
                 pendingX = null;
                 continue;
             }
@@ -792,7 +777,11 @@ public sealed class DxfImportService
             if (currentEntity.Equals("LWPOLYLINE", StringComparison.OrdinalIgnoreCase))
             {
                 polylineVertices ??= [];
-                if (code == 70 && int.TryParse(value, out var flags))
+                if (code is 8 or 62 or 420)
+                {
+                    entity[code] = value;
+                }
+                else if (code == 70 && int.TryParse(value, out var flags))
                 {
                     polylineClosed = (flags & 1) != 0;
                 }
@@ -856,6 +845,84 @@ public sealed class DxfImportService
         }
 
         return polylines;
+    }
+
+    private static List<Point2>? BuildLegacyPolylinePoints(
+        List<(Point2 Point, double Bulge)> vertices,
+        bool isClosed)
+    {
+        if (vertices.Count < 2)
+        {
+            return null;
+        }
+
+        var points = new List<Point2>();
+        for (var i = 0; i < vertices.Count; i++)
+        {
+            var next = i + 1;
+            if (next >= vertices.Count)
+            {
+                if (!isClosed)
+                {
+                    break;
+                }
+                next = 0;
+            }
+
+            var current = vertices[i];
+            var end = vertices[next];
+            if (points.Count == 0)
+            {
+                points.Add(current.Point);
+            }
+
+            if (Math.Abs(current.Bulge) < 1e-12)
+            {
+                points.Add(end.Point);
+            }
+            else
+            {
+                points.AddRange(TessellateBulge(current.Point, end.Point, current.Bulge).Skip(1));
+            }
+        }
+
+        return points.Count >= 2 ? points : null;
+    }
+
+    private static string ResolveLegacyEntityColorHex(
+        IReadOnlyDictionary<int, string> data,
+        IReadOnlyDictionary<string, string> layerColorsByName)
+    {
+        if (data.TryGetValue(420, out var trueColorRaw)
+            && int.TryParse(trueColorRaw, out var trueColor))
+        {
+            return ToColorHex(AciColor.FromTrueColor(trueColor));
+        }
+
+        if (data.TryGetValue(62, out var aciRaw)
+            && short.TryParse(aciRaw, out var aci))
+        {
+            var abs = Math.Abs(aci);
+            // 0 = ByBlock, 256 = ByLayer — fall through to layer color.
+            if (abs is >= 1 and <= 255)
+            {
+                return ToColorHex(AciColor.FromCadIndex(abs));
+            }
+        }
+
+        if (data.TryGetValue(8, out var layerName)
+            && !string.IsNullOrWhiteSpace(layerName)
+            && layerColorsByName.TryGetValue(layerName.Trim(), out var layerHex))
+        {
+            return layerHex;
+        }
+
+        if (layerColorsByName.TryGetValue("0", out var layer0Hex))
+        {
+            return layer0Hex;
+        }
+
+        return ToColorHex(AciColor.FromCadIndex(7));
     }
 
     /// <summary>

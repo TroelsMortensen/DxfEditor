@@ -83,7 +83,9 @@
 **Phase 4: Layer & Color Assignment** — 🟢
 - Layer configuration panel in the right sidebar (list + add from 10 distinct palette colors).
 - Bottom color bar assigns selected blocks (all entities) or selected entities to a layer; strokes use per-entity layer color.
-- Import preserves each entity’s source color into the workspace palette and assigns per-entity layers.
+- Import snaps each entity’s source color to the nearest official LightBurn RGB (C00–C29 + T1/T2) and assigns per-entity layers so the canvas matches LightBurn’s layer bar. CAD white / near-white maps to C00 black (same rule as LightBurn).
+- Legacy (pre-2000) DXF import binds entity colors from group 62/420 or the entity’s layer color so strokes and the palette stay in sync.
+- Workspace add-layer palette uses LightBurn C00–C09 RGB values so colors match LightBurn’s layer bar.
 
 **Phase 4.5: Workspace Bounding Box Overlay** — 🟢
 - Draw a thin grey axis-aligned bounding box around all parts currently on the canvas (union of world-space part bounds).
@@ -93,9 +95,9 @@
 **Phase 5: Master DXF Export & GitHub Pages Deployment** — 🟢
 - Export each placed part as a named `BLOCK` (local geometry) plus `INSERT` (offset, rotation, mirror via negative X scale) in one master `DxfDocument`.
 - Re-importing that master restores separate repositionable parts and layer colors; already-flattened DXFs (no inserts) still import as one part per file.
-- Client-side `.dxf` Save As (File System Access API) with download fallback.
+- Client-side `.dxf` download (browser download of `layout.dxf`).
 - GitHub Actions → GitHub Pages for the Blazor WASM publish output.
-- *LightBurn acceptance of block-structured masters is unverified on this branch; flatten export can be restored if needed.*
+- Export snaps layer/entity colors to the official LightBurn RGB table (C00–C29 + T1/T2) and writes true color on entities so LightBurn maps shapes to the correct Cxx layers by color (DXF layer names are ignored by LightBurn).
 
 **Phase 6: Backlog** — 🔴
 - **Export origin normalization:** Investigate how LightBurn places a DXF whose geometry sits far from the origin (e.g. all parts off to one side). If LightBurn does not auto-center usefully, normalize on export (e.g. shift so the workspace bbox min or center maps to a predictable origin). Document the chosen behavior.

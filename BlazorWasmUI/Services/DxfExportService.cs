@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using BlazorWasmUI.Models;
 using netDxf;
@@ -12,7 +11,7 @@ namespace BlazorWasmUI.Services;
 
 public sealed class DxfExportService
 {
-    private const string FallbackStrokeHex = "#d7dde5";
+    private const string FallbackStrokeHex = "#000000";
     private const string FallbackLayerName = "Default";
     private const double ClosedEpsilon = 1e-9;
 
@@ -60,10 +59,12 @@ public sealed class DxfExportService
                 }
 
                 var vectors = verts.Select(p => new Vector2(p.X, p.Y));
+                var layer = ResolveLayer(entity, layerById, fallbackLayer);
                 var poly = new Polyline2D(vectors, isClosed && verts.Count >= 2)
                 {
-                    Layer = ResolveLayer(entity, layerById, fallbackLayer),
-                    Color = AciColor.ByLayer,
+                    Layer = layer,
+                    // Explicit true color (snapped LB RGB) so LightBurn maps layers by color.
+                    Color = layer.Color,
                 };
 
                 blockEntities.Add(poly);
@@ -176,13 +177,10 @@ public sealed class DxfExportService
 
     private static AciColor ColorFromHex(string colorHex)
     {
-        var hex = LayerPalette.NormalizeHex(colorHex).TrimStart('#');
-        if (hex.Length != 6
-            || !byte.TryParse(hex.AsSpan(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r)
-            || !byte.TryParse(hex.AsSpan(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g)
-            || !byte.TryParse(hex.AsSpan(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
+        var snapped = LayerPalette.NearestLightBurnHex(colorHex);
+        if (!LayerPalette.TryParseRgb(snapped, out var r, out var g, out var b))
         {
-            return AciColor.FromCadIndex(7);
+            return AciColor.FromTrueColor(0);
         }
 
         var trueColor = (r << 16) | (g << 8) | b;
