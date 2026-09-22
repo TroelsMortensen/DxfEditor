@@ -111,7 +111,7 @@ public partial class LeftToolsPanel : IDisposable
                 return;
             }
 
-            Workspace.SetStatus("Exported master DXF.");
+            Workspace.SetStatus("Exported master DXF (parts as blocks).");
         }
         catch (Exception ex)
         {

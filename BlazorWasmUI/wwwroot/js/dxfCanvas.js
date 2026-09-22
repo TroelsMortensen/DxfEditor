@@ -342,7 +342,7 @@ export function createCanvasController(canvas, dotNetRef) {
       const selected = partSelected || entitySelected;
       ctx.beginPath();
       if (!drawEntityPath(part, ent.polyline, overlay)) continue;
-      ctx.strokeStyle = ent.colorHex || "#d7dde5";
+      ctx.strokeStyle = ent.colorHex || "#000000";
       ctx.lineWidth = selected ? 2.25 : 1.25;
       ctx.lineCap = "butt";
       ctx.lineJoin = "round";

@@ -1,5 +1,9 @@
 window.dxfFile = {
   /**
+   * Always uses a browser download. File System Access (showSaveFilePicker) is
+   * skipped: in Cursor's embedded browser it can truncate a file then fall through
+   * to a second download, leaving an empty .dxf behind.
+   *
    * @param {Uint8Array} bytes
    * @param {string} suggestedName
    * @returns {Promise<{ok: boolean, cancelled?: boolean, error?: string}>}
@@ -10,36 +14,10 @@ window.dxfFile = {
       : "layout.dxf";
 
     // Copy immediately: Blazor WASM may pass a view into the WASM heap that is
-    // invalid after subsequent awaits (e.g. showSaveFilePicker).
+    // invalid after subsequent awaits.
     const data = bytes instanceof Uint8Array
       ? bytes.slice()
       : new Uint8Array(bytes);
-
-    if (typeof window.showSaveFilePicker === "function") {
-      try {
-        const handle = await window.showSaveFilePicker({
-          suggestedName: name,
-          types: [
-            {
-              description: "DXF drawing",
-              accept: {
-                "application/dxf": [".dxf"],
-                "image/vnd.dxf": [".dxf"],
-              },
-            },
-          ],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(data);
-        await writable.close();
-        return { ok: true };
-      } catch (e) {
-        if (e && e.name === "AbortError") {
-          return { ok: false, cancelled: true };
-        }
-        // Fall through to download for other picker failures.
-      }
-    }
 
     try {
       downloadBlob(data, name);

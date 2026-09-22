@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Text;
 using BlazorWasmUI.Models;
 using netDxf;
+using netDxf.Blocks;
 using netDxf.Entities;
 using netDxf.Header;
 using netDxf.Tables;
@@ -11,7 +11,7 @@ namespace BlazorWasmUI.Services;
 
 public sealed class DxfExportService
 {
-    private const string FallbackStrokeHex = "#d7dde5";
+    private const string FallbackStrokeHex = "#000000";
     private const string FallbackLayerName = "Default";
     private const double ClosedEpsilon = 1e-9;
 
@@ -31,9 +31,12 @@ public sealed class DxfExportService
         }
 
         var fallbackLayer = EnsureLayer(doc, FallbackLayerName, FallbackStrokeHex);
+        var usedBlockNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var part in parts)
         {
+            var blockEntities = new List<EntityObject>();
+
             foreach (var entity in part.Entities)
             {
                 if (entity.Polyline.Count < 2)
@@ -41,16 +44,13 @@ public sealed class DxfExportService
                     continue;
                 }
 
-                var world = entity.Polyline
-                    .Select(part.TransformLocalToWorld)
-                    .ToList();
-
-                var isClosed = IsClosed(world);
-                IReadOnlyList<Point2> verts = world;
-                if (isClosed && world.Count > 2)
+                var local = entity.Polyline;
+                var isClosed = IsClosed(local);
+                IReadOnlyList<Point2> verts = local;
+                if (isClosed && local.Count > 2)
                 {
                     // Polyline2D closed flag closes first/last; drop duplicate end point.
-                    verts = world.Take(world.Count - 1).ToList();
+                    verts = local.Take(local.Count - 1).ToList();
                 }
 
                 if (verts.Count < 2)
@@ -59,14 +59,35 @@ public sealed class DxfExportService
                 }
 
                 var vectors = verts.Select(p => new Vector2(p.X, p.Y));
+                var layer = ResolveLayer(entity, layerById, fallbackLayer);
                 var poly = new Polyline2D(vectors, isClosed && verts.Count >= 2)
                 {
-                    Layer = ResolveLayer(entity, layerById, fallbackLayer),
-                    Color = AciColor.ByLayer,
+                    Layer = layer,
+                    // Explicit true color (snapped LB RGB) so LightBurn maps layers by color.
+                    Color = layer.Color,
                 };
 
-                doc.Entities.Add(poly);
+                blockEntities.Add(poly);
             }
+
+            if (blockEntities.Count == 0)
+            {
+                continue;
+            }
+
+            var blockName = AllocateBlockName(part.Name, usedBlockNames);
+            var block = new Block(blockName, blockEntities);
+            doc.Blocks.Add(block);
+
+            var insert = new Insert(block, new Vector2(part.OffsetX, part.OffsetY))
+            {
+                Rotation = part.RotationDegrees,
+                Scale = part.Mirrored
+                    ? new Vector3(-1.0, 1.0, 1.0)
+                    : new Vector3(1.0, 1.0, 1.0),
+            };
+
+            doc.Entities.Add(insert);
         }
 
         using var ms = new MemoryStream();
@@ -93,7 +114,7 @@ public sealed class DxfExportService
 
     private static Layer EnsureLayer(DxfDocument doc, string name, string colorHex)
     {
-        var safeName = SanitizeLayerName(name);
+        var safeName = SanitizeTableName(name, FallbackLayerName);
         if (doc.Layers.Contains(safeName))
         {
             return doc.Layers[safeName];
@@ -106,33 +127,36 @@ public sealed class DxfExportService
         return doc.Layers.Add(layer);
     }
 
-    private static AciColor ColorFromHex(string colorHex)
+    private static string AllocateBlockName(string partName, HashSet<string> used)
     {
-        var hex = LayerPalette.NormalizeHex(colorHex).TrimStart('#');
-        if (hex.Length != 6
-            || !byte.TryParse(hex.AsSpan(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r)
-            || !byte.TryParse(hex.AsSpan(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g)
-            || !byte.TryParse(hex.AsSpan(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
+        var baseName = SanitizeTableName(partName, "Part");
+        if (used.Add(baseName))
         {
-            return AciColor.FromCadIndex(7);
+            return baseName;
         }
 
-        var trueColor = (r << 16) | (g << 8) | b;
-        return AciColor.FromTrueColor(trueColor);
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{baseName}_{i}";
+            if (used.Add(candidate))
+            {
+                return candidate;
+            }
+        }
     }
 
-    private static string SanitizeLayerName(string name)
+    private static string SanitizeTableName(string name, string fallback)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return FallbackLayerName;
+            return fallback;
         }
 
         var sb = new StringBuilder(name.Length);
         foreach (var ch in name.Trim())
         {
-            // DXF layer names disallow <>/\":;?*|=`'
-            if (ch is '<' or '>' or '/' or '\\' or '"' or ':' or ';' or '?' or '*' or '|' or '=' or '`' or '\'')
+            if (TableObject.InvalidCharacters.Contains(ch)
+                || ch is '<' or '>' or '/' or '\\' or '"' or ':' or ';' or '?' or '*' or '|' or '=' or '`' or '\'')
             {
                 sb.Append('_');
             }
@@ -143,7 +167,24 @@ public sealed class DxfExportService
         }
 
         var sanitized = sb.ToString().Trim();
-        return string.IsNullOrEmpty(sanitized) ? FallbackLayerName : sanitized;
+        if (string.IsNullOrEmpty(sanitized) || !TableObject.IsValidName(sanitized))
+        {
+            return fallback;
+        }
+
+        return sanitized;
+    }
+
+    private static AciColor ColorFromHex(string colorHex)
+    {
+        var snapped = LayerPalette.NearestLightBurnHex(colorHex);
+        if (!LayerPalette.TryParseRgb(snapped, out var r, out var g, out var b))
+        {
+            return AciColor.FromTrueColor(0);
+        }
+
+        var trueColor = (r << 16) | (g << 8) | b;
+        return AciColor.FromTrueColor(trueColor);
     }
 
     private static bool IsClosed(IReadOnlyList<Point2> points)

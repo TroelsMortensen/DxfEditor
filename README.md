@@ -4,7 +4,7 @@ The app is hosted on GitHub Pages. You can access it [here](https://troelsmorten
 
 # Dxf Editor
 
-A lightweight, client-side web utility for preparing DXF parts for LightBurn. Import multiple individual DXF part files, arrange and nest them on a canvas, assign layers/colors, then export a single master DXF.
+A lightweight, client-side web utility for preparing DXF parts for LightBurn. Import multiple individual DXF part files, arrange and nest them on a canvas, assign layers/colors, then export a single master DXF that keeps each part as a block so you can re-import and keep editing.
 
 Everything runs in the browser (Blazor WebAssembly)—uploads are processed locally; nothing is sent to a server for DXF parsing.
 
@@ -14,7 +14,8 @@ Everything runs in the browser (Blazor WebAssembly)—uploads are processed loca
 - Pan, zoom, move, rotate, mirror, duplicate, and delete parts
 - Block and entity selection (including Shift multi-select and marquee)
 - Layer and color assignment for whole parts or individual entities
-- Export a combined master `.dxf` (Save As when supported, otherwise download)
+- Export a combined master `.dxf` (one block per part; browser download)
+- Re-import an exported master to restore separate repositionable parts (flat DXFs without blocks still import as one part each)
 - Workspace bounding box overlay with live width × height in mm
 
 Hosted on GitHub Pages (see link above).
@@ -47,7 +48,7 @@ The editor layout:
 - **Duplicate** — copies the selected part(s), offsets them slightly down and right, and adds uniquely named `(1)`, `(2)`, … entries to the Parts list. Ctrl+D / Cmd+D also duplicates, but places the copy at the mouse cursor.
 - **Delete** — removes the selected part(s). You can also press Delete or Backspace. A confirmation prompt appears first.
 - **Import** — at the bottom of the rail; opens a file picker for one or more `.dxf` files.
-- **Export** — below Import; saves the current layout (all parts, entities, and layers) as a master `.dxf` via Save As when supported, otherwise a download.
+- **Export** — below Import; downloads the current layout as a master `.dxf` (each part is a DXF block with its position/rotation/mirror). Re-importing that file restores the individual parts.
 
 <img src="docs/images/left-toolbar.png" alt="PLACEHOLDER: Left toolbar — mirror, duplicate, delete, import, export"/>
 
