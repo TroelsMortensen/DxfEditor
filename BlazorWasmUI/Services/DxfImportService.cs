@@ -658,6 +658,26 @@ public sealed class DxfImportService
                     }
                     break;
                 }
+                case "ELLIPSE":
+                {
+                    if (TryGetDouble(data, 10, out var cx) &&
+                        TryGetDouble(data, 20, out var cy) &&
+                        TryGetDouble(data, 11, out var mx) &&
+                        TryGetDouble(data, 21, out var my) &&
+                        TryGetDouble(data, 40, out var ratio))
+                    {
+                        // DXF groups 41/42 are parametric start/end in radians.
+                        var startParam = TryGetDouble(data, 41, out var sp) ? sp : 0.0;
+                        var endParam = TryGetDouble(data, 42, out var ep) ? ep : startParam;
+                        var points = TessellateEllipseDxf(
+                            cx, cy, mx, my, ratio, startParam, endParam);
+                        if (points.Count >= 2)
+                        {
+                            addPolyline(points, data);
+                        }
+                    }
+                    break;
+                }
             }
         }
 
@@ -1245,43 +1265,97 @@ public sealed class DxfImportService
 
     private static void AppendEllipse(Ellipse ellipse, List<List<Point2>> polylines)
     {
-        var start = ellipse.StartAngle;
-        var end = ellipse.EndAngle;
-        var closed = Math.Abs(end - start) < 1e-6 || Math.Abs(Math.Abs(end - start) - 360) < 1e-6;
-        if (closed)
+        // netDxf StartAngle/EndAngle are geometric degrees; PolygonalVertexes
+        // converts to parametric angles correctly. Vertices are center-relative.
+        var precision = Math.Max(24, ArcSegments);
+        var local = ellipse.PolygonalVertexes(precision);
+        if (local.Count < 2)
         {
-            start = 0;
-            end = 360;
+            return;
         }
 
-        var major = ellipse.MajorAxis;
-        var minor = ellipse.MinorAxis;
         var cx = ellipse.Center.X;
         var cy = ellipse.Center.Y;
-        var rotation = ellipse.Rotation * Math.PI / 180.0;
-        var cosR = Math.Cos(rotation);
-        var sinR = Math.Sin(rotation);
-
-        var span = end - start;
-        if (span < 0)
+        var points = new List<Point2>(local.Count + (ellipse.IsFullEllipse ? 1 : 0));
+        foreach (var v in local)
         {
-            span += 360;
+            points.Add(new Point2(v.X + cx, v.Y + cy));
         }
 
-        var steps = Math.Max(24, (int)Math.Ceiling(ArcSegments * span / 360.0));
-        var points = new List<Point2>(steps + 1);
-        for (var i = 0; i <= steps; i++)
+        if (ellipse.IsFullEllipse && points.Count > 1)
         {
-            var t = start + span * i / steps;
-            var rad = t * Math.PI / 180.0;
-            var lx = major * 0.5 * Math.Cos(rad);
-            var ly = minor * 0.5 * Math.Sin(rad);
-            var x = cx + lx * cosR - ly * sinR;
-            var y = cy + lx * sinR + ly * cosR;
-            points.Add(new Point2(x, y));
+            points.Add(points[0]);
         }
 
         polylines.Add(points);
+    }
+
+    /// <summary>
+    /// Tessellates a DXF ELLIPSE (center, major-axis endpoint relative to center,
+    /// minor/major ratio, parametric start/end in radians) into a polyline.
+    /// </summary>
+    private static List<Point2> TessellateEllipseDxf(
+        double cx,
+        double cy,
+        double majorEndX,
+        double majorEndY,
+        double ratio,
+        double startParamRad,
+        double endParamRad)
+    {
+        var majorLen = Math.Sqrt((majorEndX * majorEndX) + (majorEndY * majorEndY));
+        if (majorLen < 1e-12 || ratio <= 0)
+        {
+            return [];
+        }
+
+        var minorLen = majorLen * ratio;
+        var rotation = Math.Atan2(majorEndY, majorEndX);
+        var cosR = Math.Cos(rotation);
+        var sinR = Math.Sin(rotation);
+
+        var start = startParamRad;
+        var end = endParamRad;
+        var full = Math.Abs(end - start) < 1e-9;
+        double span;
+        if (full)
+        {
+            start = 0;
+            span = 2 * Math.PI;
+        }
+        else
+        {
+            span = end - start;
+            // Normalize to a positive sweep of at most one full turn.
+            while (span <= 0)
+            {
+                span += 2 * Math.PI;
+            }
+
+            while (span > 2 * Math.PI + 1e-9)
+            {
+                span -= 2 * Math.PI;
+            }
+        }
+
+        var steps = Math.Max(24, (int)Math.Ceiling(ArcSegments * span / (2 * Math.PI)));
+        var points = new List<Point2>(steps + 1);
+        for (var i = 0; i <= steps; i++)
+        {
+            var t = start + (span * i / steps);
+            var lx = majorLen * Math.Cos(t);
+            var ly = minorLen * Math.Sin(t);
+            var x = cx + (lx * cosR) - (ly * sinR);
+            var y = cy + (lx * sinR) + (ly * cosR);
+            points.Add(new Point2(x, y));
+        }
+
+        if (full && points.Count > 1)
+        {
+            points[^1] = points[0];
+        }
+
+        return points;
     }
 
     private static List<Point2> TessellateArc(
