@@ -587,6 +587,7 @@ public sealed class DxfImportService
         var polylineClosed = false;
         Dictionary<int, string>? vertexEntity = null;
         double? pendingX = null;
+        LegacySplineBuilder? splineBuilder = null;
 
         void AddPolyline(List<Point2> points, IReadOnlyDictionary<int, string> colorData)
         {
@@ -695,6 +696,22 @@ public sealed class DxfImportService
                 return;
             }
 
+            if (currentEntity.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (splineBuilder is not null)
+                {
+                    var points = splineBuilder.Tessellate(Math.Max(48, ArcSegments));
+                    if (points is { Count: >= 2 })
+                    {
+                        AddPolyline(points, splineBuilder.ColorData);
+                    }
+                }
+
+                splineBuilder = null;
+                entity = new Dictionary<int, string>();
+                return;
+            }
+
             FinalizeEntity(currentEntity, entity, polylineVertices, polylineClosed, AddPolyline);
             entity = new Dictionary<int, string>();
             if (currentEntity.Equals("LWPOLYLINE", StringComparison.OrdinalIgnoreCase))
@@ -749,6 +766,18 @@ public sealed class DxfImportService
                     polylineClosed = false;
                     vertexEntity = null;
                     pendingX = null;
+                    splineBuilder = null;
+                    currentEntity = value;
+                    entity = new Dictionary<int, string>();
+                    continue;
+                }
+
+                if (value.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+                {
+                    splineBuilder = new LegacySplineBuilder();
+                    polylineVertices = null;
+                    vertexEntity = null;
+                    pendingX = null;
                     currentEntity = value;
                     entity = new Dictionary<int, string>();
                     continue;
@@ -781,6 +810,14 @@ public sealed class DxfImportService
                 currentEntity = value;
                 entity = new Dictionary<int, string>();
                 pendingX = null;
+                splineBuilder = null;
+                continue;
+            }
+
+            if (currentEntity.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+            {
+                splineBuilder ??= new LegacySplineBuilder();
+                splineBuilder.Add(code, value);
                 continue;
             }
 
@@ -865,6 +902,162 @@ public sealed class DxfImportService
         }
 
         return polylines;
+    }
+
+    /// <summary>
+    /// Accumulates DXF SPLINE group codes (knots/weights/control points repeat).
+    /// </summary>
+    private sealed class LegacySplineBuilder
+    {
+        public short Degree { get; private set; }
+        public int Flags { get; private set; }
+        public Dictionary<int, string> ColorData { get; } = new();
+        public List<double> Knots { get; } = [];
+        public List<double> Weights { get; } = [];
+        public List<Vector3> Controls { get; } = [];
+
+        private double? _pendingX;
+        private double? _pendingY;
+
+        public void Add(int code, string value)
+        {
+            if (code is 8 or 62 or 420)
+            {
+                ColorData[code] = value;
+                return;
+            }
+
+            if (code == 70 && int.TryParse(value, out var flags))
+            {
+                Flags = flags;
+                return;
+            }
+
+            if (code == 71 && short.TryParse(value, out var degree))
+            {
+                Degree = degree;
+                return;
+            }
+
+            if (code == 40
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var knot))
+            {
+                Knots.Add(knot);
+                return;
+            }
+
+            if (code == 41
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var weight))
+            {
+                Weights.Add(weight);
+                return;
+            }
+
+            if (code == 10
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var x))
+            {
+                // Some writers omit group 30; flush previous XY as Z=0.
+                if (_pendingX is double ox && _pendingY is double oy)
+                {
+                    Controls.Add(new Vector3(ox, oy, 0));
+                }
+
+                _pendingX = x;
+                _pendingY = null;
+                return;
+            }
+
+            if (code == 20
+                && _pendingX is double px
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var y))
+            {
+                _pendingY = y;
+                return;
+            }
+
+            if (code == 30
+                && _pendingX is double cx
+                && _pendingY is double cy
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var z))
+            {
+                Controls.Add(new Vector3(cx, cy, z));
+                _pendingX = null;
+                _pendingY = null;
+            }
+        }
+
+        public List<Point2>? Tessellate(int precision)
+        {
+            if (_pendingX is double ox && _pendingY is double oy)
+            {
+                Controls.Add(new Vector3(ox, oy, 0));
+                _pendingX = null;
+                _pendingY = null;
+            }
+
+            if (Controls.Count < 2 || Degree < 1)
+            {
+                return null;
+            }
+
+            // DXF 70: bit0 closed, bit1 periodic, bit2 rational, bit3 planar.
+            var isClosed = (Flags & 1) != 0;
+            var isClosedPeriodic = (Flags & 2) != 0;
+
+            double[]? weights = Weights.Count == Controls.Count
+                ? Weights.ToArray()
+                : null;
+            double[]? knots = Knots.Count > 0 ? Knots.ToArray() : null;
+
+            try
+            {
+                var verts = Spline.NurbsEvaluator(
+                    Controls.ToArray(),
+                    weights,
+                    knots,
+                    Degree,
+                    isClosed,
+                    isClosedPeriodic,
+                    precision);
+
+                var points = verts.Select(v => new Point2(v.X, v.Y)).ToList();
+                if ((isClosed || isClosedPeriodic) && points.Count > 1)
+                {
+                    var a = points[0];
+                    var b = points[^1];
+                    if (Math.Abs(a.X - b.X) > 1e-9 || Math.Abs(a.Y - b.Y) > 1e-9)
+                    {
+                        points.Add(a);
+                    }
+                }
+
+                return points.Count >= 2 ? points : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 
     private static List<Point2>? BuildLegacyPolylinePoints(
@@ -1208,6 +1401,35 @@ public sealed class DxfImportService
             case Ellipse ellipse:
                 AppendEllipse(ellipse, polylines);
                 break;
+
+            case Spline spline:
+                AppendSpline(spline, polylines);
+                break;
+        }
+    }
+
+    private static void AppendSpline(Spline spline, List<List<Point2>> polylines)
+    {
+        var precision = Math.Max(48, ArcSegments);
+        var poly = spline.ToPolyline2D(precision);
+        var points = poly.Vertexes
+            .Select(v => new Point2(v.Position.X, v.Position.Y))
+            .ToList();
+
+        var closed = poly.IsClosed || spline.IsClosed || spline.IsClosedPeriodic;
+        if (closed && points.Count > 1)
+        {
+            var a = points[0];
+            var b = points[^1];
+            if (Math.Abs(a.X - b.X) > 1e-9 || Math.Abs(a.Y - b.Y) > 1e-9)
+            {
+                points.Add(a);
+            }
+        }
+
+        if (points.Count >= 2)
+        {
+            polylines.Add(points);
         }
     }
 

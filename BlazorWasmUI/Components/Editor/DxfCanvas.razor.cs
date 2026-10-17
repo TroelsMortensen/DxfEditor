@@ -19,6 +19,7 @@ public partial class DxfCanvas
     protected override void OnInitialized()
     {
         Workspace.Changed += OnWorkspaceChanged;
+        Workspace.CenterViewRequested += OnCenterViewRequested;
     }
 
     private void OpenInfo() => _infoOpen = true;
@@ -98,9 +99,22 @@ public partial class DxfCanvas
     }
 
     [JSInvokable]
-    public void OnViewportChanged(double panX, double panY, double zoom)
+    public void OnViewportChanged(double panX, double panY, double zoom, double cssWidth, double cssHeight)
     {
-        Workspace.SetViewport(panX, panY, zoom);
+        Workspace.SetViewport(panX, panY, zoom, cssWidth, cssHeight);
+    }
+
+    private void OnCenterViewRequested()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (_controller is null)
+            {
+                return;
+            }
+
+            await _controller.InvokeVoidAsync("centerOnWorkspace");
+        });
     }
 
     [JSInvokable]
@@ -134,8 +148,10 @@ public partial class DxfCanvas
     }
 
     [JSInvokable]
-    public Task OnFilesDropped(DroppedFileDto[] files)
+    public Task OnFilesDropped(DroppedFileDto[] files, double cssWidth, double cssHeight)
     {
+        Workspace.SetCanvasSize(cssWidth, cssHeight);
+
         var decoded = new List<(string Name, byte[] Data)>();
         string? decodeError = null;
 
@@ -167,6 +183,7 @@ public partial class DxfCanvas
     public async ValueTask DisposeAsync()
     {
         Workspace.Changed -= OnWorkspaceChanged;
+        Workspace.CenterViewRequested -= OnCenterViewRequested;
         try
         {
             if (_controller is not null)
