@@ -1,4 +1,5 @@
 using BlazorWasmUI.Services;
+using BlazorWasmUI.Services.History;
 
 namespace BlazorWasmUI.Components.Editor;
 
@@ -11,7 +12,7 @@ public partial class LayerBarPanel : IDisposable
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 
-    private void Assign(Guid layerId) => Workspace.AssignSelectionToLayer(layerId);
+    private void Assign(Guid layerId) => History.AssignSelectionToLayer(layerId);
 
     private bool IsActiveLayer(Guid layerId)
     {

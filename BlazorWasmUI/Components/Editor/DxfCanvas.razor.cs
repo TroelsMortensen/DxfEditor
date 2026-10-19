@@ -1,5 +1,6 @@
 using BlazorWasmUI.Models;
 using BlazorWasmUI.Services;
+using BlazorWasmUI.Services.History;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 
@@ -95,7 +96,7 @@ public partial class DxfCanvas
     [JSInvokable]
     public void OnPartsTransformed(PartTransformDto[] transforms)
     {
-        Workspace.ApplyTransforms(transforms);
+        History.RecordTransforms(transforms);
     }
 
     [JSInvokable]
@@ -137,15 +138,21 @@ public partial class DxfCanvas
             return;
         }
 
-        Workspace.DeleteSelection();
+        History.DeleteSelection();
     }
 
     [JSInvokable]
     public Task OnDuplicateRequested(double? worldX, double? worldY)
     {
-        Workspace.DuplicateSelection(worldX, worldY);
+        History.DuplicateSelection(worldX, worldY);
         return Task.CompletedTask;
     }
+
+    [JSInvokable]
+    public void OnUndoRequested() => History.Undo();
+
+    [JSInvokable]
+    public void OnRedoRequested() => History.Redo();
 
     [JSInvokable]
     public Task OnFilesDropped(DroppedFileDto[] files, double cssWidth, double cssHeight)

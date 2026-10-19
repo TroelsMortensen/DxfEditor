@@ -1,6 +1,6 @@
 # 001 — Undo / Redo (v1)
 
-**Status:** Planned (saved for later)  
+**Status:** Implemented  
 **Related:** [SRS.md](../SRS.md) feature #20
 
 ## Scope (locked)
@@ -145,13 +145,13 @@ Non-undoable actions (import, fit, export, selection, viewport) keep calling **`
 
 ## Implementation checklist
 
-- [ ] Add `IEditorCommand`, `EditorHistory`, Transform/Assign/Duplicate/Delete commands under `Services/History/`
-- [ ] Register `EditorHistory` in `Program.cs`; keep `WorkspaceState` free of stacks
-- [ ] Add only minimal `WorkspaceState` helpers needed by commands (e.g. insert-at-index)
-- [ ] Route undoable UI paths through `EditorHistory` (toolbar mirror/duplicate/delete, layer bar, canvas transforms/duplicate/delete)
-- [ ] Add Undo/Redo buttons after Fit; mirrored redo icon CSS
-- [ ] Wire Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z in `dxfCanvas.js` + `DxfCanvas` JSInvokable
-- [ ] Update InfoHelpModal and SRS feature #20
+- [x] Add `IEditorCommand`, `EditorHistory`, Transform/Assign/Duplicate/Delete commands under `Services/History/`
+- [x] Register `EditorHistory` in `Program.cs`; keep `WorkspaceState` free of stacks
+- [x] Add only minimal `WorkspaceState` helpers needed by commands (e.g. insert-at-index)
+- [x] Route undoable UI paths through `EditorHistory` (toolbar mirror/duplicate/delete, layer bar, canvas transforms/duplicate/delete)
+- [x] Add Undo/Redo buttons after Fit; mirrored redo icon CSS
+- [x] Wire Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z in `dxfCanvas.js` + `DxfCanvas` JSInvokable
+- [x] Update InfoHelpModal and SRS feature #20
 
 ## Out of scope (later)
 

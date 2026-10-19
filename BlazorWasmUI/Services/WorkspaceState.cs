@@ -374,6 +374,70 @@ public sealed class WorkspaceState
         Notify();
     }
 
+    public void AssignEntityLayers(IEnumerable<(Guid EntityId, Guid? LayerId)> assignments)
+    {
+        var map = _parts.SelectMany(p => p.Entities).ToDictionary(e => e.Id);
+        var changed = false;
+        foreach (var (entityId, layerId) in assignments)
+        {
+            if (!map.TryGetValue(entityId, out var entity) || entity.LayerId == layerId)
+            {
+                continue;
+            }
+
+            entity.LayerId = layerId;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            Notify();
+        }
+    }
+
+    public void InsertPartsAt(IEnumerable<(int Index, PlacedPart Part)> entries)
+    {
+        var ordered = entries.OrderBy(e => e.Index).ToList();
+        if (ordered.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (index, part) in ordered)
+        {
+            if (_parts.Any(p => p.Id == part.Id))
+            {
+                continue;
+            }
+
+            var clamped = Math.Clamp(index, 0, _parts.Count);
+            _parts.Insert(clamped, part);
+        }
+
+        Notify();
+    }
+
+    public int RemovePartsByIds(IEnumerable<Guid> ids)
+    {
+        var removeIds = ids.ToHashSet();
+        if (removeIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var removed = _parts.RemoveAll(p => removeIds.Contains(p.Id));
+        if (removed == 0)
+        {
+            return 0;
+        }
+
+        _selectedPartIds.RemoveWhere(removeIds.Contains);
+        var remainingEntityIds = _parts.SelectMany(p => p.Entities.Select(e => e.Id)).ToHashSet();
+        _selectedEntityIds.RemoveWhere(id => !remainingEntityIds.Contains(id));
+        Notify();
+        return removed;
+    }
+
     public void SetViewport(double panX, double panY, double zoom, double cssWidth, double cssHeight)
     {
         CssWidth = cssWidth;

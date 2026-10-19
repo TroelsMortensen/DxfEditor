@@ -1,6 +1,8 @@
 @namespace BlazorWasmUI.Components.Editor
 @using BlazorWasmUI.Services
+@using BlazorWasmUI.Services.History
 @inject WorkspaceState Workspace
+@inject EditorHistory History
 @inject DxfImportService ImportService
 @inject DxfExportService ExportService
 @implements IDisposable
@@ -41,6 +43,20 @@
                 disabled="@(Workspace.Parts.Count == 0)"
                 @onclick="CenterView">
             <img src="img/home.svg" alt="" class="tool-icon" />
+        </button>
+        <button type="button"
+                class="tool-btn"
+                title="Undo (Ctrl/Cmd+Z)"
+                disabled="@(!History.CanUndo)"
+                @onclick="Undo">
+            <img src="img/undo.svg" alt="" class="tool-icon" />
+        </button>
+        <button type="button"
+                class="tool-btn"
+                title="Redo (Ctrl/Cmd+Shift+Z)"
+                disabled="@(!History.CanRedo)"
+                @onclick="Redo">
+            <img src="img/undo.svg" alt="" class="tool-icon tool-icon--mirrored" />
         </button>
     </div>
     <div class="tools-panel__divider" aria-hidden="true"></div>

@@ -5,7 +5,7 @@
   A lightweight, client-side web utility to ingest multiple individual DXF part files, arrange and nest them to minimize a bounding box, assign cut/edge layers and colors, and export a single master DXF (one BLOCK+INSERT per part) ready for LightBurn and for re-import as separate repositionable parts.
 - **Hosting:**  
   Static deployment via GitHub Pages (Blazor WASM).
-- **Status:** Phases 1–5 complete (layers/colors, master DXF export, GitHub Pages), including workspace bounding-box overlay (Phase 4.5). Remaining: Phase 6 backlog (export origin, undo/redo, rename, SVG import).
+- **Status:** Phases 1–5 complete (layers/colors, master DXF export, GitHub Pages), including workspace bounding-box overlay (Phase 4.5). Remaining: Phase 6 backlog (export origin, rename, SVG import).
 
 ## Tech Stack
 
@@ -19,13 +19,13 @@
 - Organize components into logical folders; match file names to component names.
 - Prefer code-behind (`.razor.cs`) over inline `@code` blocks.
 - Prefer local stylesheets (`.razor.css`) over global styles when it makes sense.
-- Current layout: `Models/` (`PlacedPart`, `PartEntity`, layers/scene DTOs), `Services/` (`WorkspaceState`, `DxfImportService`, `DxfExportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`, `InfoHelpModal`).
+- Current layout: `Models/` (`PlacedPart`, `PartEntity`, layers/scene DTOs), `Services/` (`WorkspaceState`, `EditorHistory` + commands under `History/`, `DxfImportService`, `DxfExportService`), `Components/Editor/` (`EditorShell`, `DxfCanvas`, `LeftToolsPanel`, `PartsListPanel`, `LayerBarPanel`, `LayerEditPanel`, `InfoHelpModal`).
 
 ## UI layout
 
 - **Canvas (center):** primary surface for DXF parts; drop target for `.dxf` files; pan/zoom/select/transform.
 - **Info button:** 50×50 overlay at canvas top-left (`img/info.svg`); opens a scrollable help modal describing toolbar, layers, parts list, layer bar, and canvas gestures.
-- **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), duplicate, delete; import and export at the bottom. Icons live under `wwwroot/img/`.
+- **Left tools rail:** horizontal mirror, vertical mirror (same icon rotated 90°), duplicate, delete, fit, undo, redo; import and export at the bottom. Icons live under `wwwroot/img/`.
 - **Right sidebar:** layer editor (list + add from palette) above parts list; selecting a part row selects/highlights it on the canvas.
 - **Top bar:** app title only for now.
 - **Bottom bar:** layer color buttons; click assigns the current block or entity selection to that layer.
@@ -56,7 +56,7 @@
 | 17 | In-app help modal (info button on canvas) | 🟢 |
 | 18 | Duplicate selection (toolbar offsets ~50px; Ctrl/Cmd+D places at cursor; unique `(n)` names in Parts list) | 🟢 |
 | 19 | Export origin normalization (investigate LightBurn placement; shift/normalize if needed) | 🔴 |
-| 20 | Undo / redo | 🔴 |
+| 20 | Undo / redo (command deltas; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) | 🟢 |
 | 21 | Rename parts in the Parts list | 🔴 |
 | 22 | SVG import (convert to DXF entities on import or at export) | 🔴 |
 
@@ -102,6 +102,6 @@
 
 **Phase 6: Backlog** — 🔴
 - **Export origin normalization:** Investigate how LightBurn places a DXF whose geometry sits far from the origin (e.g. all parts off to one side). If LightBurn does not auto-center usefully, normalize on export (e.g. shift so the workspace bbox min or center maps to a predictable origin). Document the chosen behavior.
-- **Undo / redo:** Essential for iterative nesting. Expect this to grow complicated—prefer a clear command/snapshot model early (what is undoable: move, rotate, mirror, duplicate, delete, layer assign, rename, import) and keep history bounded. Keyboard shortcuts Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y).
+- **Undo / redo:** 🟢 Done (v1) — `EditorHistory` command deltas for move/rotate/mirror/duplicate/delete/layer assign; depth 50; Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z. Later: rename, import.
 - **Rename parts:** Allow renaming entries in the Parts list (inline edit or dialog); keep names unique or disambiguate; selection sync unchanged.
 - **SVG import:** Accept `.svg` drops/picks alongside `.dxf`. Convert paths/shapes to DXF-compatible entities either at import (into workspace geometry) or deferred at master export—decide based on edit fidelity vs. complexity. Closed paths should become polylines/lwpolylines suitable for cutting.

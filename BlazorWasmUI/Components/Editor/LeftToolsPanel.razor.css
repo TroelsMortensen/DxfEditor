@@ -56,6 +56,10 @@
     transform: rotate(90deg);
 }
 
+.tool-icon--mirrored {
+    transform: scaleX(-1);
+}
+
 .tool-btn:hover:not(:disabled) {
     background: #353c48;
     border-color: #f0b429;

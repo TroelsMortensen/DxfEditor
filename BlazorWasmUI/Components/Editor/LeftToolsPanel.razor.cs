@@ -1,4 +1,5 @@
 using BlazorWasmUI.Services;
+using BlazorWasmUI.Services.History;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
@@ -18,17 +19,22 @@ public partial class LeftToolsPanel : IDisposable
     protected override void OnInitialized()
     {
         Workspace.Changed += OnChanged;
+        History.Changed += OnChanged;
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 
-    private void MirrorHorizontal() => Workspace.MirrorSelectionHorizontal();
+    private void MirrorHorizontal() => History.MirrorSelectionHorizontal();
 
-    private void MirrorVertical() => Workspace.MirrorSelectionVertical();
+    private void MirrorVertical() => History.MirrorSelectionVertical();
 
-    private void Duplicate() => Workspace.DuplicateSelection();
+    private void Duplicate() => History.DuplicateSelection();
 
     private void CenterView() => Workspace.RequestCenterViewOnWorkspace();
+
+    private void Undo() => History.Undo();
+
+    private void Redo() => History.Redo();
 
     private async Task OnFilesSelected(InputFileChangeEventArgs e)
     {
@@ -81,7 +87,7 @@ public partial class LeftToolsPanel : IDisposable
             return;
         }
 
-        Workspace.DeleteSelection();
+        History.DeleteSelection();
     }
 
     private async Task ExportAsync()
@@ -133,5 +139,9 @@ public partial class LeftToolsPanel : IDisposable
         public string? Error { get; set; }
     }
 
-    public void Dispose() => Workspace.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Workspace.Changed -= OnChanged;
+        History.Changed -= OnChanged;
+    }
 }

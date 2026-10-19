@@ -1,8 +1,10 @@
 @namespace BlazorWasmUI.Components.Editor
 @using BlazorWasmUI.Models
 @using BlazorWasmUI.Services
+@using BlazorWasmUI.Services.History
 @inject IJSRuntime Js
 @inject WorkspaceState Workspace
+@inject EditorHistory History
 @inject DxfImportService ImportService
 @implements IAsyncDisposable
 

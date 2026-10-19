@@ -887,6 +887,16 @@ export function createCanvasController(canvas, dotNetRef) {
     }
 
     const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "z" || e.key === "Z")) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        dotNetRef.invokeMethodAsync("OnRedoRequested");
+      } else {
+        dotNetRef.invokeMethodAsync("OnUndoRequested");
+      }
+      return;
+    }
+
     if (mod && (e.key === "d" || e.key === "D") && getEditablePartIds().size > 0) {
       e.preventDefault();
       if (state.lastPointerScreen) {
