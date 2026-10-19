@@ -23,6 +23,8 @@ public sealed class WorkspaceState
     public double PanX { get; private set; }
     public double PanY { get; private set; }
     public double Zoom { get; private set; } = 1;
+    public double CssWidth { get; private set; }
+    public double CssHeight { get; private set; }
 
     private const int StatusClearDelayMs = 5000;
 
@@ -31,6 +33,7 @@ public sealed class WorkspaceState
     private CancellationTokenSource? _statusClearCts;
 
     public event Action? Changed;
+    public event Action? CenterViewRequested;
 
     public void SetStatus(string? message)
     {
@@ -371,9 +374,12 @@ public sealed class WorkspaceState
         Notify();
     }
 
-    public void SetViewport(double panX, double panY, double zoom)
+    public void SetViewport(double panX, double panY, double zoom, double cssWidth, double cssHeight)
     {
-        var clamped = Math.Clamp(zoom, 0.05, 50);
+        CssWidth = cssWidth;
+        CssHeight = cssHeight;
+
+        var clamped = Math.Clamp(zoom, 0.05, 100);
         if (Math.Abs(PanX - panX) < 1e-9 && Math.Abs(PanY - panY) < 1e-9 && Math.Abs(Zoom - clamped) < 1e-12)
         {
             return;
@@ -383,6 +389,34 @@ public sealed class WorkspaceState
         PanY = panY;
         Zoom = clamped;
         Notify();
+    }
+
+    public void SetCanvasSize(double cssWidth, double cssHeight)
+    {
+        CssWidth = cssWidth;
+        CssHeight = cssHeight;
+    }
+
+    public Point2 GetViewCenterWorld()
+    {
+        if (CssWidth <= 0 || CssHeight <= 0 || Zoom <= 0)
+        {
+            return new Point2(0, 0);
+        }
+
+        return new Point2(
+            (CssWidth * 0.5 - PanX) / Zoom,
+            -((CssHeight * 0.5 - PanY) / Zoom));
+    }
+
+    public void RequestCenterViewOnWorkspace()
+    {
+        if (_parts.Count == 0)
+        {
+            return;
+        }
+
+        CenterViewRequested?.Invoke();
     }
 
     public void MirrorSelectionHorizontal()
@@ -596,40 +630,53 @@ public sealed class WorkspaceState
 
     private void SpreadParts(List<PlacedPart> newParts)
     {
-        const double gap = 20;
-        const double maxRowWidth = 800;
+        const double spacing = 20;
 
-        var cursorX = 0.0;
-        var rowY = 0.0;
-        var rowHeight = 0.0;
-        var rowStartX = 0.0;
+        var sizes = newParts
+            .Select(p => new CornerQueuePacker.Size(
+                Math.Max(p.LocalBounds.Width, 1),
+                Math.Max(p.LocalBounds.Height, 1)))
+            .ToList();
 
-        if (_parts.Count > 0)
+        IReadOnlyList<Bounds2> obstacles;
+        Point2 origin;
+        Point2? firstCenter;
+
+        if (_parts.Count == 0)
         {
-            var existingMaxX = _parts.Max(p => p.GetWorldBounds().MaxX);
-            var existingMinY = _parts.Min(p => p.GetWorldBounds().MinY);
-            cursorX = existingMaxX + gap;
-            rowStartX = cursorX;
-            rowY = existingMinY;
+            obstacles = [];
+            var viewCenter = GetViewCenterWorld();
+            origin = viewCenter;
+            firstCenter = viewCenter;
+        }
+        else
+        {
+            obstacles = _parts.Select(p => p.GetWorldBounds()).ToList();
+            origin = UnionCenter(obstacles);
+            firstCenter = null;
         }
 
-        foreach (var part in newParts)
+        var placements = CornerQueuePacker.Pack(sizes, obstacles, origin, spacing, firstCenter);
+        for (var i = 0; i < newParts.Count; i++)
         {
-            var w = Math.Max(part.LocalBounds.Width, 1);
-            var h = Math.Max(part.LocalBounds.Height, 1);
-
-            if (cursorX - rowStartX > maxRowWidth && cursorX > rowStartX)
-            {
-                cursorX = rowStartX;
-                rowY += rowHeight + gap;
-                rowHeight = 0;
-            }
-
-            part.OffsetX = cursorX + w * 0.5;
-            part.OffsetY = rowY + h * 0.5;
-            cursorX += w + gap;
-            rowHeight = Math.Max(rowHeight, h);
+            var pl = placements[i];
+            newParts[i].OffsetX = pl.BottomLeftX + pl.Width * 0.5;
+            newParts[i].OffsetY = pl.BottomLeftY + pl.Height * 0.5;
         }
+    }
+
+    private static Point2 UnionCenter(IReadOnlyList<Bounds2> bounds)
+    {
+        if (bounds.Count == 0)
+        {
+            return new Point2(0, 0);
+        }
+
+        var minX = bounds.Min(b => b.MinX);
+        var minY = bounds.Min(b => b.MinY);
+        var maxX = bounds.Max(b => b.MaxX);
+        var maxY = bounds.Max(b => b.MaxY);
+        return new Point2((minX + maxX) * 0.5, (minY + maxY) * 0.5);
     }
 
     private static Point2 GetSelectionCentroid(IReadOnlyList<PlacedPart> selected)

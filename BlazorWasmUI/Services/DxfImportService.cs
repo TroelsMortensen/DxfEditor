@@ -587,6 +587,7 @@ public sealed class DxfImportService
         var polylineClosed = false;
         Dictionary<int, string>? vertexEntity = null;
         double? pendingX = null;
+        LegacySplineBuilder? splineBuilder = null;
 
         void AddPolyline(List<Point2> points, IReadOnlyDictionary<int, string> colorData)
         {
@@ -658,6 +659,26 @@ public sealed class DxfImportService
                     }
                     break;
                 }
+                case "ELLIPSE":
+                {
+                    if (TryGetDouble(data, 10, out var cx) &&
+                        TryGetDouble(data, 20, out var cy) &&
+                        TryGetDouble(data, 11, out var mx) &&
+                        TryGetDouble(data, 21, out var my) &&
+                        TryGetDouble(data, 40, out var ratio))
+                    {
+                        // DXF groups 41/42 are parametric start/end in radians.
+                        var startParam = TryGetDouble(data, 41, out var sp) ? sp : 0.0;
+                        var endParam = TryGetDouble(data, 42, out var ep) ? ep : startParam;
+                        var points = TessellateEllipseDxf(
+                            cx, cy, mx, my, ratio, startParam, endParam);
+                        if (points.Count >= 2)
+                        {
+                            addPolyline(points, data);
+                        }
+                    }
+                    break;
+                }
             }
         }
 
@@ -672,6 +693,22 @@ public sealed class DxfImportService
                 currentEntity.Equals("VERTEX", StringComparison.OrdinalIgnoreCase) ||
                 currentEntity.Equals("SEQEND", StringComparison.OrdinalIgnoreCase))
             {
+                return;
+            }
+
+            if (currentEntity.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (splineBuilder is not null)
+                {
+                    var points = splineBuilder.Tessellate(Math.Max(48, ArcSegments));
+                    if (points is { Count: >= 2 })
+                    {
+                        AddPolyline(points, splineBuilder.ColorData);
+                    }
+                }
+
+                splineBuilder = null;
+                entity = new Dictionary<int, string>();
                 return;
             }
 
@@ -729,6 +766,18 @@ public sealed class DxfImportService
                     polylineClosed = false;
                     vertexEntity = null;
                     pendingX = null;
+                    splineBuilder = null;
+                    currentEntity = value;
+                    entity = new Dictionary<int, string>();
+                    continue;
+                }
+
+                if (value.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+                {
+                    splineBuilder = new LegacySplineBuilder();
+                    polylineVertices = null;
+                    vertexEntity = null;
+                    pendingX = null;
                     currentEntity = value;
                     entity = new Dictionary<int, string>();
                     continue;
@@ -761,6 +810,14 @@ public sealed class DxfImportService
                 currentEntity = value;
                 entity = new Dictionary<int, string>();
                 pendingX = null;
+                splineBuilder = null;
+                continue;
+            }
+
+            if (currentEntity.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+            {
+                splineBuilder ??= new LegacySplineBuilder();
+                splineBuilder.Add(code, value);
                 continue;
             }
 
@@ -845,6 +902,162 @@ public sealed class DxfImportService
         }
 
         return polylines;
+    }
+
+    /// <summary>
+    /// Accumulates DXF SPLINE group codes (knots/weights/control points repeat).
+    /// </summary>
+    private sealed class LegacySplineBuilder
+    {
+        public short Degree { get; private set; }
+        public int Flags { get; private set; }
+        public Dictionary<int, string> ColorData { get; } = new();
+        public List<double> Knots { get; } = [];
+        public List<double> Weights { get; } = [];
+        public List<Vector3> Controls { get; } = [];
+
+        private double? _pendingX;
+        private double? _pendingY;
+
+        public void Add(int code, string value)
+        {
+            if (code is 8 or 62 or 420)
+            {
+                ColorData[code] = value;
+                return;
+            }
+
+            if (code == 70 && int.TryParse(value, out var flags))
+            {
+                Flags = flags;
+                return;
+            }
+
+            if (code == 71 && short.TryParse(value, out var degree))
+            {
+                Degree = degree;
+                return;
+            }
+
+            if (code == 40
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var knot))
+            {
+                Knots.Add(knot);
+                return;
+            }
+
+            if (code == 41
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var weight))
+            {
+                Weights.Add(weight);
+                return;
+            }
+
+            if (code == 10
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var x))
+            {
+                // Some writers omit group 30; flush previous XY as Z=0.
+                if (_pendingX is double ox && _pendingY is double oy)
+                {
+                    Controls.Add(new Vector3(ox, oy, 0));
+                }
+
+                _pendingX = x;
+                _pendingY = null;
+                return;
+            }
+
+            if (code == 20
+                && _pendingX is double px
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var y))
+            {
+                _pendingY = y;
+                return;
+            }
+
+            if (code == 30
+                && _pendingX is double cx
+                && _pendingY is double cy
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var z))
+            {
+                Controls.Add(new Vector3(cx, cy, z));
+                _pendingX = null;
+                _pendingY = null;
+            }
+        }
+
+        public List<Point2>? Tessellate(int precision)
+        {
+            if (_pendingX is double ox && _pendingY is double oy)
+            {
+                Controls.Add(new Vector3(ox, oy, 0));
+                _pendingX = null;
+                _pendingY = null;
+            }
+
+            if (Controls.Count < 2 || Degree < 1)
+            {
+                return null;
+            }
+
+            // DXF 70: bit0 closed, bit1 periodic, bit2 rational, bit3 planar.
+            var isClosed = (Flags & 1) != 0;
+            var isClosedPeriodic = (Flags & 2) != 0;
+
+            double[]? weights = Weights.Count == Controls.Count
+                ? Weights.ToArray()
+                : null;
+            double[]? knots = Knots.Count > 0 ? Knots.ToArray() : null;
+
+            try
+            {
+                var verts = Spline.NurbsEvaluator(
+                    Controls.ToArray(),
+                    weights,
+                    knots,
+                    Degree,
+                    isClosed,
+                    isClosedPeriodic,
+                    precision);
+
+                var points = verts.Select(v => new Point2(v.X, v.Y)).ToList();
+                if ((isClosed || isClosedPeriodic) && points.Count > 1)
+                {
+                    var a = points[0];
+                    var b = points[^1];
+                    if (Math.Abs(a.X - b.X) > 1e-9 || Math.Abs(a.Y - b.Y) > 1e-9)
+                    {
+                        points.Add(a);
+                    }
+                }
+
+                return points.Count >= 2 ? points : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 
     private static List<Point2>? BuildLegacyPolylinePoints(
@@ -1188,6 +1401,35 @@ public sealed class DxfImportService
             case Ellipse ellipse:
                 AppendEllipse(ellipse, polylines);
                 break;
+
+            case Spline spline:
+                AppendSpline(spline, polylines);
+                break;
+        }
+    }
+
+    private static void AppendSpline(Spline spline, List<List<Point2>> polylines)
+    {
+        var precision = Math.Max(48, ArcSegments);
+        var poly = spline.ToPolyline2D(precision);
+        var points = poly.Vertexes
+            .Select(v => new Point2(v.Position.X, v.Position.Y))
+            .ToList();
+
+        var closed = poly.IsClosed || spline.IsClosed || spline.IsClosedPeriodic;
+        if (closed && points.Count > 1)
+        {
+            var a = points[0];
+            var b = points[^1];
+            if (Math.Abs(a.X - b.X) > 1e-9 || Math.Abs(a.Y - b.Y) > 1e-9)
+            {
+                points.Add(a);
+            }
+        }
+
+        if (points.Count >= 2)
+        {
+            polylines.Add(points);
         }
     }
 
@@ -1245,43 +1487,97 @@ public sealed class DxfImportService
 
     private static void AppendEllipse(Ellipse ellipse, List<List<Point2>> polylines)
     {
-        var start = ellipse.StartAngle;
-        var end = ellipse.EndAngle;
-        var closed = Math.Abs(end - start) < 1e-6 || Math.Abs(Math.Abs(end - start) - 360) < 1e-6;
-        if (closed)
+        // netDxf StartAngle/EndAngle are geometric degrees; PolygonalVertexes
+        // converts to parametric angles correctly. Vertices are center-relative.
+        var precision = Math.Max(24, ArcSegments);
+        var local = ellipse.PolygonalVertexes(precision);
+        if (local.Count < 2)
         {
-            start = 0;
-            end = 360;
+            return;
         }
 
-        var major = ellipse.MajorAxis;
-        var minor = ellipse.MinorAxis;
         var cx = ellipse.Center.X;
         var cy = ellipse.Center.Y;
-        var rotation = ellipse.Rotation * Math.PI / 180.0;
-        var cosR = Math.Cos(rotation);
-        var sinR = Math.Sin(rotation);
-
-        var span = end - start;
-        if (span < 0)
+        var points = new List<Point2>(local.Count + (ellipse.IsFullEllipse ? 1 : 0));
+        foreach (var v in local)
         {
-            span += 360;
+            points.Add(new Point2(v.X + cx, v.Y + cy));
         }
 
-        var steps = Math.Max(24, (int)Math.Ceiling(ArcSegments * span / 360.0));
-        var points = new List<Point2>(steps + 1);
-        for (var i = 0; i <= steps; i++)
+        if (ellipse.IsFullEllipse && points.Count > 1)
         {
-            var t = start + span * i / steps;
-            var rad = t * Math.PI / 180.0;
-            var lx = major * 0.5 * Math.Cos(rad);
-            var ly = minor * 0.5 * Math.Sin(rad);
-            var x = cx + lx * cosR - ly * sinR;
-            var y = cy + lx * sinR + ly * cosR;
-            points.Add(new Point2(x, y));
+            points.Add(points[0]);
         }
 
         polylines.Add(points);
+    }
+
+    /// <summary>
+    /// Tessellates a DXF ELLIPSE (center, major-axis endpoint relative to center,
+    /// minor/major ratio, parametric start/end in radians) into a polyline.
+    /// </summary>
+    private static List<Point2> TessellateEllipseDxf(
+        double cx,
+        double cy,
+        double majorEndX,
+        double majorEndY,
+        double ratio,
+        double startParamRad,
+        double endParamRad)
+    {
+        var majorLen = Math.Sqrt((majorEndX * majorEndX) + (majorEndY * majorEndY));
+        if (majorLen < 1e-12 || ratio <= 0)
+        {
+            return [];
+        }
+
+        var minorLen = majorLen * ratio;
+        var rotation = Math.Atan2(majorEndY, majorEndX);
+        var cosR = Math.Cos(rotation);
+        var sinR = Math.Sin(rotation);
+
+        var start = startParamRad;
+        var end = endParamRad;
+        var full = Math.Abs(end - start) < 1e-9;
+        double span;
+        if (full)
+        {
+            start = 0;
+            span = 2 * Math.PI;
+        }
+        else
+        {
+            span = end - start;
+            // Normalize to a positive sweep of at most one full turn.
+            while (span <= 0)
+            {
+                span += 2 * Math.PI;
+            }
+
+            while (span > 2 * Math.PI + 1e-9)
+            {
+                span -= 2 * Math.PI;
+            }
+        }
+
+        var steps = Math.Max(24, (int)Math.Ceiling(ArcSegments * span / (2 * Math.PI)));
+        var points = new List<Point2>(steps + 1);
+        for (var i = 0; i <= steps; i++)
+        {
+            var t = start + (span * i / steps);
+            var lx = majorLen * Math.Cos(t);
+            var ly = minorLen * Math.Sin(t);
+            var x = cx + (lx * cosR) - (ly * sinR);
+            var y = cy + (lx * sinR) + (ly * cosR);
+            points.Add(new Point2(x, y));
+        }
+
+        if (full && points.Count > 1)
+        {
+            points[^1] = points[0];
+        }
+
+        return points;
     }
 
     private static List<Point2> TessellateArc(

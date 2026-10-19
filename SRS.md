@@ -10,7 +10,7 @@
 ## Tech Stack
 
 - **Framework:** Blazor WebAssembly (.NET 10)
-- **DXF Processing:** netDxf (client-side). Uploads are buffered into a seekable `MemoryStream` (no filesystem paths). Pre-2000 ASCII DXFs (e.g. Fusion 360 R14 / AC1014) are header-upgraded to AC1015; if netDxf still fails, a legacy ASCII fallback parses common entities including `LWPOLYLINE`.
+- **DXF Processing:** netDxf (client-side). Uploads are buffered into a seekable `MemoryStream` (no filesystem paths). Pre-2000 ASCII DXFs (e.g. Fusion 360 R14 / AC1014) are header-upgraded to AC1015; if netDxf still fails, a legacy ASCII fallback parses common entities including `LWPOLYLINE`, `ELLIPSE`, and `SPLINE`. `ELLIPSE` and `SPLINE` (netDxf and legacy) are tessellated to polylines on import; master export writes polylines only (LightBurn-friendly).
 - **UI / Styling:** Blazor Razor components + HTML5 `<canvas>` with a dedicated JS `requestAnimationFrame` handler (`wwwroot/js/dxfCanvas.js`). C# owns workspace state; JS owns smooth gesture redraw and commits transforms/selection back to Blazor.
 
 ## Architecture
@@ -98,6 +98,7 @@
 - Client-side `.dxf` download (browser download of `layout.dxf`).
 - GitHub Actions → GitHub Pages for the Blazor WASM publish output.
 - Export snaps layer/entity colors to the official LightBurn RGB table (C00–C29 + T1/T2) and writes true color on entities so LightBurn maps shapes to the correct Cxx layers by color (DXF layer names are ignored by LightBurn).
+- Imported ellipses and splines are stored and re-exported as polylines (no native ELLIPSE/SPLINE entities in the master file).
 
 **Phase 6: Backlog** — 🔴
 - **Export origin normalization:** Investigate how LightBurn places a DXF whose geometry sits far from the origin (e.g. all parts off to one side). If LightBurn does not auto-center usefully, normalize on export (e.g. shift so the workspace bbox min or center maps to a predictable origin). Document the chosen behavior.

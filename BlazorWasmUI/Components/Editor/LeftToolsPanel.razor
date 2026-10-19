@@ -35,6 +35,13 @@
                 @onclick="DeleteAsync">
             <img src="img/delete.svg" alt="" class="tool-icon" />
         </button>
+        <button type="button"
+                class="tool-btn"
+                title="Fit workspace in view"
+                disabled="@(Workspace.Parts.Count == 0)"
+                @onclick="CenterView">
+            <img src="img/home.svg" alt="" class="tool-icon" />
+        </button>
     </div>
     <div class="tools-panel__divider" aria-hidden="true"></div>
     <div class="tools-panel__spacer" aria-hidden="true"></div>

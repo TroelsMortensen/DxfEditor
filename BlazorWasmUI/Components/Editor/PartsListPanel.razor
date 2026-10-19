@@ -18,6 +18,7 @@
                 <li>
                     <button type="button"
                             class="parts-panel__item @(selected ? "is-selected" : null)"
+                            title="@part.Name"
                             @onclick="e => Select(part.Id, e)">
                         @part.Name
                     </button>

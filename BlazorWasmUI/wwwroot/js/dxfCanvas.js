@@ -25,6 +25,8 @@ export function createCanvasController(canvas, dotNetRef) {
   const HANDLE_OFFSET = 34;
   const HANDLE_SIZE = 22;
   const HANDLE_HIT = 14;
+  const ZOOM_MIN = 0.05;
+  const ZOOM_MAX = 100;
 
   const rotateIcon = new Image();
   rotateIcon.src = "img/rotate.svg";
@@ -58,6 +60,7 @@ export function createCanvasController(canvas, dotNetRef) {
     canvas.height = Math.max(1, Math.floor(rect.height * state.dpr));
     ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
     invalidate();
+    scheduleViewportCommit();
   }
 
   function worldToScreen(x, y) {
@@ -797,7 +800,7 @@ export function createCanvasController(canvas, dotNetRef) {
     const p = pointerPos(e);
     const before = screenToWorld(p.x, p.y);
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    state.zoom = Math.min(50, Math.max(0.05, state.zoom * factor));
+    state.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, state.zoom * factor));
     const after = worldToScreen(before.x, before.y);
     state.panX += p.x - after.x;
     state.panY += p.y - after.y;
@@ -813,10 +816,36 @@ export function createCanvasController(canvas, dotNetRef) {
 
   async function commitViewport() {
     try {
-      await dotNetRef.invokeMethodAsync("OnViewportChanged", state.panX, state.panY, state.zoom);
+      await dotNetRef.invokeMethodAsync(
+        "OnViewportChanged",
+        state.panX,
+        state.panY,
+        state.zoom,
+        state.cssWidth,
+        state.cssHeight
+      );
     } catch {
       /* disposed */
     }
+  }
+
+  function centerOnWorkspace() {
+    const b = workspaceWorldBounds();
+    if (!b) {
+      return;
+    }
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
+    if (w > 0 && h > 0 && state.cssWidth > 0 && state.cssHeight > 0) {
+      const fitZoom = Math.min(state.cssWidth / w, state.cssHeight / h) * 0.9;
+      state.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, fitZoom));
+    }
+    const cx = (b.minX + b.maxX) * 0.5;
+    const cy = (b.minY + b.maxY) * 0.5;
+    state.panX = state.cssWidth * 0.5 - cx * state.zoom;
+    state.panY = state.cssHeight * 0.5 + cy * state.zoom;
+    invalidate();
+    commitViewport();
   }
 
   async function commitSelection() {
@@ -904,7 +933,12 @@ export function createCanvasController(canvas, dotNetRef) {
       }
       payloads.push({ name: file.name, dataBase64: btoa(binary) });
     }
-    await dotNetRef.invokeMethodAsync("OnFilesDropped", payloads);
+    await dotNetRef.invokeMethodAsync(
+      "OnFilesDropped",
+      payloads,
+      state.cssWidth,
+      state.cssHeight
+    );
   }
 
   const ro = new ResizeObserver(() => resize());
@@ -954,6 +988,7 @@ export function createCanvasController(canvas, dotNetRef) {
       // Viewport stays JS-authoritative; C# is updated via OnViewportChanged only.
       invalidate();
     },
+    centerOnWorkspace,
     dispose() {
       cancelAnimationFrame(state.raf);
       clearTimeout(viewportTimer);
