@@ -28,6 +28,8 @@ public partial class LeftToolsPanel : IDisposable
 
     private void Duplicate() => Workspace.DuplicateSelection();
 
+    private void CenterView() => Workspace.RequestCenterViewOnWorkspace();
+
     private async Task OnFilesSelected(InputFileChangeEventArgs e)
     {
         var files = new List<(string Name, byte[] Data)>();
@@ -111,7 +113,7 @@ public partial class LeftToolsPanel : IDisposable
                 return;
             }
 
-            Workspace.SetStatus("Exported master DXF.");
+            Workspace.SetStatus("Exported master DXF (parts as blocks).");
         }
         catch (Exception ex)
         {

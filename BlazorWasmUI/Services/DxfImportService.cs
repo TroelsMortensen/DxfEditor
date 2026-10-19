@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using BlazorWasmUI.Models;
 using netDxf;
+using netDxf.Blocks;
 using netDxf.Entities;
 using netDxf.Header;
 
@@ -82,15 +83,16 @@ public sealed class DxfImportService
                             bufferSize: 1024,
                             leaveOpen: true);
                         var fallbackText = fallbackReader.ReadToEnd();
-                        var fallbackPolylines = ParseLegacyAsciiPolylines(fallbackText);
-                        if (fallbackPolylines.Count > 0)
+                        var legacyLayers = ParseLegacyAsciiLayers(fallbackText);
+                        var layerColors = legacyLayers.ToDictionary(
+                            l => l.Name,
+                            l => l.ColorHex,
+                            StringComparer.OrdinalIgnoreCase);
+                        var legacyGeom = ParseLegacyAsciiPolylines(fallbackText, layerColors);
+                        if (legacyGeom.Count > 0)
                         {
                             warnings.Add(
                                 $"Imported '{fileName}' via legacy ASCII fallback parser ({FormatVersion(version)}).");
-                            var legacyLayers = ParseLegacyAsciiLayers(fallbackText);
-                            var legacyGeom = fallbackPolylines
-                                .Select(p => new ImportedGeom { Points = p, ColorHex = null })
-                                .ToList();
                             return BuildImportFromGeometry(fileName, legacyGeom, warnings, legacyLayers);
                         }
 
@@ -104,47 +106,7 @@ public sealed class DxfImportService
                     return ImportResult.Fail($"Failed to parse '{fileName}'.", warnings);
                 }
 
-                var entities = CollectEntities(doc);
-                var geometry = new List<ImportedGeom>();
-                var layerTallies = new Dictionary<string, (string Name, string ColorHex, int Count)>(
-                    StringComparer.OrdinalIgnoreCase);
-
-                SeedLayersFromDocument(doc, layerTallies);
-
-                foreach (var entity in entities)
-                {
-                    try
-                    {
-                        TallyEntityEffectiveColor(entity, layerTallies);
-                        var batch = new List<List<Point2>>();
-                        AppendEntity(entity, batch);
-                        var hex = EffectiveColorHex(entity);
-                        foreach (var poly in batch)
-                        {
-                            geometry.Add(new ImportedGeom { Points = poly, ColorHex = hex });
-                        }
-                    }
-                    catch
-                    {
-                        warnings.Add($"Skipped unsupported entity in '{fileName}'.");
-                    }
-                }
-
-                var importedLayers = layerTallies.Values
-                    // Skip unused table layers (e.g. default Layer 0) so they do not
-                    // pollute the workspace palette when no entity uses that color.
-                    .Where(v => v.Count > 0)
-                    .Select(v => new ImportedLayerInfo
-                    {
-                        Name = v.Name,
-                        ColorHex = v.ColorHex,
-                        EntityCount = v.Count,
-                    })
-                    .OrderByDescending(l => l.EntityCount)
-                    .ThenBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                return BuildImportFromGeometry(fileName, geometry, warnings, importedLayers);
+                return BuildImportFromDocument(doc, fileName, warnings);
             }
         }
         catch (Exception ex)
@@ -159,6 +121,239 @@ public sealed class DxfImportService
         public string? ColorHex { get; init; }
     }
 
+    private ImportResult BuildImportFromDocument(
+        DxfDocument doc,
+        string fileName,
+        List<string> warnings)
+    {
+        var layerTallies = new Dictionary<string, (string Name, string ColorHex, int Count)>(
+            StringComparer.OrdinalIgnoreCase);
+        SeedLayersFromDocument(doc, layerTallies);
+
+        var inserts = new List<Insert>();
+        var looseEntities = new List<EntityObject>();
+
+        foreach (var entity in doc.Entities.All)
+        {
+            if (entity is Insert insert)
+            {
+                inserts.Add(insert);
+            }
+            else
+            {
+                looseEntities.Add(entity);
+            }
+        }
+
+        var parts = new List<PlacedPart>();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < inserts.Count; i++)
+        {
+            var insert = inserts[i];
+            try
+            {
+                var part = BuildPartFromInsert(insert, fileName, i, usedNames, layerTallies, warnings);
+                if (part is not null)
+                {
+                    parts.Add(part);
+                }
+            }
+            catch
+            {
+                warnings.Add($"Skipped unsupported insert in '{fileName}'.");
+            }
+        }
+
+        if (looseEntities.Count > 0 || inserts.Count == 0)
+        {
+            var entities = inserts.Count == 0
+                ? CollectEntities(doc)
+                : ExplodeNestedInserts(looseEntities);
+
+            var geometry = ConvertEntitiesToGeometry(entities, fileName, layerTallies, warnings);
+            if (geometry.Count > 0)
+            {
+                var looseName = inserts.Count == 0
+                    ? fileName
+                    : AllocatePartName(Path.GetFileNameWithoutExtension(fileName) + "_loose", usedNames);
+                parts.Add(BuildPartFromGeometry(looseName, geometry));
+            }
+        }
+
+        if (parts.Count == 0)
+        {
+            return ImportResult.Fail($"No drawable geometry found in '{fileName}'.", warnings);
+        }
+
+        var importedLayers = BuildImportedLayers(layerTallies);
+        var preserveLayout = inserts.Count > 0;
+        return ImportResult.Ok(parts, warnings, importedLayers, preserveLayout);
+    }
+
+    private static PlacedPart? BuildPartFromInsert(
+        Insert insert,
+        string fileName,
+        int index,
+        HashSet<string> usedNames,
+        Dictionary<string, (string Name, string ColorHex, int Count)> layerTallies,
+        List<string> warnings)
+    {
+        var block = insert.Block;
+        if (block is null)
+        {
+            return null;
+        }
+
+        var blockEntities = ExplodeNestedInserts(block.Entities);
+        var geometry = ConvertEntitiesToGeometry(blockEntities, fileName, layerTallies, warnings);
+        if (geometry.Count == 0)
+        {
+            return null;
+        }
+
+        var scaleX = insert.Scale.X;
+        var scaleY = insert.Scale.Y;
+        var absX = Math.Abs(scaleX);
+        var absY = Math.Abs(scaleY);
+        if (absX < 1e-12)
+        {
+            absX = 1.0;
+        }
+
+        if (absY < 1e-12)
+        {
+            absY = 1.0;
+        }
+
+        // Bake non-unit absolute scale into local geometry; keep sign as Mirrored.
+        if (Math.Abs(absX - 1.0) > 1e-9 || Math.Abs(absY - 1.0) > 1e-9)
+        {
+            geometry = geometry
+                .Select(g => new ImportedGeom
+                {
+                    Points = g.Points.Select(p => new Point2(p.X * absX, p.Y * absY)).ToList(),
+                    ColorHex = g.ColorHex,
+                })
+                .ToList();
+        }
+
+        var mirrored = scaleX < 0;
+        var rotation = insert.Rotation;
+        var posX = insert.Position.X;
+        var posY = insert.Position.Y;
+
+        var allPoints = geometry.SelectMany(g => g.Points).ToList();
+        var bounds = Bounds2.FromPoints(allPoints);
+        var center = bounds.Center;
+
+        // World pose of the recentered local origin (block origin → insert transform → center).
+        var lx = mirrored ? -center.X : center.X;
+        var ly = center.Y;
+        var rad = rotation * Math.PI / 180.0;
+        var cos = Math.Cos(rad);
+        var sin = Math.Sin(rad);
+        var offsetX = lx * cos - ly * sin + posX;
+        var offsetY = lx * sin + ly * cos + posY;
+
+        var entities = geometry
+            .Select(g => new PartEntity
+            {
+                Polyline = g.Points
+                    .Select(p => new Point2(p.X - center.X, p.Y - center.Y))
+                    .ToList(),
+                SourceColorHex = g.ColorHex is null
+                    ? null
+                    : LayerPalette.NormalizeHex(g.ColorHex),
+            })
+            .ToList();
+
+        var localBounds = new Bounds2(
+            bounds.MinX - center.X,
+            bounds.MinY - center.Y,
+            bounds.MaxX - center.X,
+            bounds.MaxY - center.Y);
+
+        var baseName = !string.IsNullOrWhiteSpace(block.Name) && !block.IsForInternalUseOnly
+            ? block.Name
+            : $"{Path.GetFileNameWithoutExtension(fileName)}_{index + 1}";
+        var name = AllocatePartName(baseName, usedNames);
+
+        return new PlacedPart
+        {
+            Name = name,
+            Entities = entities,
+            LocalBounds = localBounds,
+            OffsetX = offsetX,
+            OffsetY = offsetY,
+            RotationDegrees = rotation,
+            Mirrored = mirrored,
+        };
+    }
+
+    private static List<ImportedGeom> ConvertEntitiesToGeometry(
+        IEnumerable<EntityObject> entities,
+        string fileName,
+        Dictionary<string, (string Name, string ColorHex, int Count)> layerTallies,
+        List<string> warnings)
+    {
+        var geometry = new List<ImportedGeom>();
+        foreach (var entity in entities)
+        {
+            try
+            {
+                TallyEntityEffectiveColor(entity, layerTallies);
+                var batch = new List<List<Point2>>();
+                AppendEntity(entity, batch);
+                var hex = EffectiveColorHex(entity);
+                foreach (var poly in batch)
+                {
+                    geometry.Add(new ImportedGeom { Points = poly, ColorHex = hex });
+                }
+            }
+            catch
+            {
+                warnings.Add($"Skipped unsupported entity in '{fileName}'.");
+            }
+        }
+
+        return geometry;
+    }
+
+    private static List<ImportedLayerInfo> BuildImportedLayers(
+        Dictionary<string, (string Name, string ColorHex, int Count)> layerTallies) =>
+        layerTallies.Values
+            // Skip unused table layers (e.g. default Layer 0) so they do not
+            // pollute the workspace palette when no entity uses that color.
+            .Where(v => v.Count > 0)
+            .Select(v => new ImportedLayerInfo
+            {
+                Name = v.Name,
+                ColorHex = v.ColorHex,
+                EntityCount = v.Count,
+            })
+            .OrderByDescending(l => l.EntityCount)
+            .ThenBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static string AllocatePartName(string baseName, HashSet<string> used)
+    {
+        var name = string.IsNullOrWhiteSpace(baseName) ? "Part" : baseName.Trim();
+        if (used.Add(name))
+        {
+            return name;
+        }
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{name}_{i}";
+            if (used.Add(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
     private static ImportResult BuildImportFromGeometry(
         string fileName,
         IReadOnlyList<ImportedGeom> geometry,
@@ -170,6 +365,14 @@ public sealed class DxfImportService
             return ImportResult.Fail($"No drawable geometry found in '{fileName}'.", warnings);
         }
 
+        var part = BuildPartFromGeometry(fileName, geometry);
+        return ImportResult.Ok([part], warnings, importedLayers, preserveWorldLayout: false);
+    }
+
+    private static PlacedPart BuildPartFromGeometry(
+        string name,
+        IReadOnlyList<ImportedGeom> geometry)
+    {
         var allPoints = geometry.SelectMany(g => g.Points);
         var bounds = Bounds2.FromPoints(allPoints);
         var center = bounds.Center;
@@ -192,16 +395,14 @@ public sealed class DxfImportService
             bounds.MaxX - center.X,
             bounds.MaxY - center.Y);
 
-        var part = new PlacedPart
+        return new PlacedPart
         {
-            Name = fileName,
+            Name = name,
             Entities = entities,
             LocalBounds = localBounds,
             OffsetX = center.X,
             OffsetY = center.Y,
         };
-
-        return ImportResult.Ok(part, warnings, importedLayers);
     }
 
     private static void SeedLayersFromDocument(
@@ -372,10 +573,12 @@ public sealed class DxfImportService
         return dxfText;
     }
 
-    private static List<List<Point2>> ParseLegacyAsciiPolylines(string text)
+    private static List<ImportedGeom> ParseLegacyAsciiPolylines(
+        string text,
+        IReadOnlyDictionary<string, string> layerColorsByName)
     {
         var pairs = ReadDxfPairs(text);
-        var polylines = new List<List<Point2>>();
+        var polylines = new List<ImportedGeom>();
 
         var inEntities = false;
         var currentEntity = string.Empty;
@@ -384,19 +587,38 @@ public sealed class DxfImportService
         var polylineClosed = false;
         Dictionary<int, string>? vertexEntity = null;
         double? pendingX = null;
+        LegacySplineBuilder? splineBuilder = null;
+
+        void AddPolyline(List<Point2> points, IReadOnlyDictionary<int, string> colorData)
+        {
+            if (points.Count < 2)
+            {
+                return;
+            }
+
+            polylines.Add(new ImportedGeom
+            {
+                Points = points,
+                ColorHex = ResolveLegacyEntityColorHex(colorData, layerColorsByName),
+            });
+        }
 
         static void FinalizeEntity(
             string entityName,
             Dictionary<int, string> data,
             List<(Point2 Point, double Bulge)>? lwVertices,
             bool lwClosed,
-            List<List<Point2>> outPolylines)
+            Action<List<Point2>, IReadOnlyDictionary<int, string>> addPolyline)
         {
             if (entityName.Equals("LWPOLYLINE", StringComparison.OrdinalIgnoreCase))
             {
                 if (lwVertices is { Count: > 0 })
                 {
-                    FinalizeLegacyPolyline(lwVertices, lwClosed, outPolylines);
+                    var points = BuildLegacyPolylinePoints(lwVertices, lwClosed);
+                    if (points is not null)
+                    {
+                        addPolyline(points, data);
+                    }
                 }
 
                 return;
@@ -411,7 +633,7 @@ public sealed class DxfImportService
                         TryGetDouble(data, 11, out var x2) &&
                         TryGetDouble(data, 21, out var y2))
                     {
-                        outPolylines.Add([new Point2(x1, y1), new Point2(x2, y2)]);
+                        addPolyline([new Point2(x1, y1), new Point2(x2, y2)], data);
                     }
                     break;
                 }
@@ -421,7 +643,7 @@ public sealed class DxfImportService
                         TryGetDouble(data, 20, out var cy) &&
                         TryGetDouble(data, 40, out var r))
                     {
-                        outPolylines.Add(TessellateArc(cx, cy, r, 0, 360, closed: true));
+                        addPolyline(TessellateArc(cx, cy, r, 0, 360, closed: true), data);
                     }
                     break;
                 }
@@ -433,56 +655,30 @@ public sealed class DxfImportService
                         TryGetDouble(data, 50, out var a0) &&
                         TryGetDouble(data, 51, out var a1))
                     {
-                        outPolylines.Add(TessellateArc(cx, cy, r, a0, a1, closed: false));
+                        addPolyline(TessellateArc(cx, cy, r, a0, a1, closed: false), data);
                     }
                     break;
                 }
-            }
-        }
-
-        static void FinalizeLegacyPolyline(
-            List<(Point2 Point, double Bulge)> vertices,
-            bool isClosed,
-            List<List<Point2>> outPolylines)
-        {
-            if (vertices.Count < 2)
-            {
-                return;
-            }
-
-            var points = new List<Point2>();
-            for (var i = 0; i < vertices.Count; i++)
-            {
-                var next = i + 1;
-                if (next >= vertices.Count)
+                case "ELLIPSE":
                 {
-                    if (!isClosed)
+                    if (TryGetDouble(data, 10, out var cx) &&
+                        TryGetDouble(data, 20, out var cy) &&
+                        TryGetDouble(data, 11, out var mx) &&
+                        TryGetDouble(data, 21, out var my) &&
+                        TryGetDouble(data, 40, out var ratio))
                     {
-                        break;
+                        // DXF groups 41/42 are parametric start/end in radians.
+                        var startParam = TryGetDouble(data, 41, out var sp) ? sp : 0.0;
+                        var endParam = TryGetDouble(data, 42, out var ep) ? ep : startParam;
+                        var points = TessellateEllipseDxf(
+                            cx, cy, mx, my, ratio, startParam, endParam);
+                        if (points.Count >= 2)
+                        {
+                            addPolyline(points, data);
+                        }
                     }
-                    next = 0;
+                    break;
                 }
-
-                var current = vertices[i];
-                var end = vertices[next];
-                if (points.Count == 0)
-                {
-                    points.Add(current.Point);
-                }
-
-                if (Math.Abs(current.Bulge) < 1e-12)
-                {
-                    points.Add(end.Point);
-                }
-                else
-                {
-                    points.AddRange(TessellateBulge(current.Point, end.Point, current.Bulge).Skip(1));
-                }
-            }
-
-            if (points.Count >= 2)
-            {
-                outPolylines.Add(points);
             }
         }
 
@@ -500,7 +696,23 @@ public sealed class DxfImportService
                 return;
             }
 
-            FinalizeEntity(currentEntity, entity, polylineVertices, polylineClosed, polylines);
+            if (currentEntity.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (splineBuilder is not null)
+                {
+                    var points = splineBuilder.Tessellate(Math.Max(48, ArcSegments));
+                    if (points is { Count: >= 2 })
+                    {
+                        AddPolyline(points, splineBuilder.ColorData);
+                    }
+                }
+
+                splineBuilder = null;
+                entity = new Dictionary<int, string>();
+                return;
+            }
+
+            FinalizeEntity(currentEntity, entity, polylineVertices, polylineClosed, AddPolyline);
             entity = new Dictionary<int, string>();
             if (currentEntity.Equals("LWPOLYLINE", StringComparison.OrdinalIgnoreCase))
             {
@@ -534,7 +746,11 @@ public sealed class DxfImportService
                 if (polylineVertices is { Count: > 0 } &&
                     currentEntity.Equals("POLYLINE", StringComparison.OrdinalIgnoreCase))
                 {
-                    FinalizeLegacyPolyline(polylineVertices, polylineClosed, polylines);
+                    var points = BuildLegacyPolylinePoints(polylineVertices, polylineClosed);
+                    if (points is not null)
+                    {
+                        AddPolyline(points, entity);
+                    }
                 }
                 break;
             }
@@ -550,7 +766,20 @@ public sealed class DxfImportService
                     polylineClosed = false;
                     vertexEntity = null;
                     pendingX = null;
+                    splineBuilder = null;
                     currentEntity = value;
+                    entity = new Dictionary<int, string>();
+                    continue;
+                }
+
+                if (value.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+                {
+                    splineBuilder = new LegacySplineBuilder();
+                    polylineVertices = null;
+                    vertexEntity = null;
+                    pendingX = null;
+                    currentEntity = value;
+                    entity = new Dictionary<int, string>();
                     continue;
                 }
 
@@ -565,7 +794,11 @@ public sealed class DxfImportService
                 {
                     if (polylineVertices is { Count: > 0 })
                     {
-                        FinalizeLegacyPolyline(polylineVertices, polylineClosed, polylines);
+                        var points = BuildLegacyPolylinePoints(polylineVertices, polylineClosed);
+                        if (points is not null)
+                        {
+                            AddPolyline(points, entity);
+                        }
                     }
                     polylineVertices = null;
                     vertexEntity = null;
@@ -575,7 +808,16 @@ public sealed class DxfImportService
                 }
 
                 currentEntity = value;
+                entity = new Dictionary<int, string>();
                 pendingX = null;
+                splineBuilder = null;
+                continue;
+            }
+
+            if (currentEntity.Equals("SPLINE", StringComparison.OrdinalIgnoreCase))
+            {
+                splineBuilder ??= new LegacySplineBuilder();
+                splineBuilder.Add(code, value);
                 continue;
             }
 
@@ -592,7 +834,11 @@ public sealed class DxfImportService
             if (currentEntity.Equals("LWPOLYLINE", StringComparison.OrdinalIgnoreCase))
             {
                 polylineVertices ??= [];
-                if (code == 70 && int.TryParse(value, out var flags))
+                if (code is 8 or 62 or 420)
+                {
+                    entity[code] = value;
+                }
+                else if (code == 70 && int.TryParse(value, out var flags))
                 {
                     polylineClosed = (flags & 1) != 0;
                 }
@@ -656,6 +902,240 @@ public sealed class DxfImportService
         }
 
         return polylines;
+    }
+
+    /// <summary>
+    /// Accumulates DXF SPLINE group codes (knots/weights/control points repeat).
+    /// </summary>
+    private sealed class LegacySplineBuilder
+    {
+        public short Degree { get; private set; }
+        public int Flags { get; private set; }
+        public Dictionary<int, string> ColorData { get; } = new();
+        public List<double> Knots { get; } = [];
+        public List<double> Weights { get; } = [];
+        public List<Vector3> Controls { get; } = [];
+
+        private double? _pendingX;
+        private double? _pendingY;
+
+        public void Add(int code, string value)
+        {
+            if (code is 8 or 62 or 420)
+            {
+                ColorData[code] = value;
+                return;
+            }
+
+            if (code == 70 && int.TryParse(value, out var flags))
+            {
+                Flags = flags;
+                return;
+            }
+
+            if (code == 71 && short.TryParse(value, out var degree))
+            {
+                Degree = degree;
+                return;
+            }
+
+            if (code == 40
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var knot))
+            {
+                Knots.Add(knot);
+                return;
+            }
+
+            if (code == 41
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var weight))
+            {
+                Weights.Add(weight);
+                return;
+            }
+
+            if (code == 10
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var x))
+            {
+                // Some writers omit group 30; flush previous XY as Z=0.
+                if (_pendingX is double ox && _pendingY is double oy)
+                {
+                    Controls.Add(new Vector3(ox, oy, 0));
+                }
+
+                _pendingX = x;
+                _pendingY = null;
+                return;
+            }
+
+            if (code == 20
+                && _pendingX is double px
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var y))
+            {
+                _pendingY = y;
+                return;
+            }
+
+            if (code == 30
+                && _pendingX is double cx
+                && _pendingY is double cy
+                && double.TryParse(
+                    value,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var z))
+            {
+                Controls.Add(new Vector3(cx, cy, z));
+                _pendingX = null;
+                _pendingY = null;
+            }
+        }
+
+        public List<Point2>? Tessellate(int precision)
+        {
+            if (_pendingX is double ox && _pendingY is double oy)
+            {
+                Controls.Add(new Vector3(ox, oy, 0));
+                _pendingX = null;
+                _pendingY = null;
+            }
+
+            if (Controls.Count < 2 || Degree < 1)
+            {
+                return null;
+            }
+
+            // DXF 70: bit0 closed, bit1 periodic, bit2 rational, bit3 planar.
+            var isClosed = (Flags & 1) != 0;
+            var isClosedPeriodic = (Flags & 2) != 0;
+
+            double[]? weights = Weights.Count == Controls.Count
+                ? Weights.ToArray()
+                : null;
+            double[]? knots = Knots.Count > 0 ? Knots.ToArray() : null;
+
+            try
+            {
+                var verts = Spline.NurbsEvaluator(
+                    Controls.ToArray(),
+                    weights,
+                    knots,
+                    Degree,
+                    isClosed,
+                    isClosedPeriodic,
+                    precision);
+
+                var points = verts.Select(v => new Point2(v.X, v.Y)).ToList();
+                if ((isClosed || isClosedPeriodic) && points.Count > 1)
+                {
+                    var a = points[0];
+                    var b = points[^1];
+                    if (Math.Abs(a.X - b.X) > 1e-9 || Math.Abs(a.Y - b.Y) > 1e-9)
+                    {
+                        points.Add(a);
+                    }
+                }
+
+                return points.Count >= 2 ? points : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    private static List<Point2>? BuildLegacyPolylinePoints(
+        List<(Point2 Point, double Bulge)> vertices,
+        bool isClosed)
+    {
+        if (vertices.Count < 2)
+        {
+            return null;
+        }
+
+        var points = new List<Point2>();
+        for (var i = 0; i < vertices.Count; i++)
+        {
+            var next = i + 1;
+            if (next >= vertices.Count)
+            {
+                if (!isClosed)
+                {
+                    break;
+                }
+                next = 0;
+            }
+
+            var current = vertices[i];
+            var end = vertices[next];
+            if (points.Count == 0)
+            {
+                points.Add(current.Point);
+            }
+
+            if (Math.Abs(current.Bulge) < 1e-12)
+            {
+                points.Add(end.Point);
+            }
+            else
+            {
+                points.AddRange(TessellateBulge(current.Point, end.Point, current.Bulge).Skip(1));
+            }
+        }
+
+        return points.Count >= 2 ? points : null;
+    }
+
+    private static string ResolveLegacyEntityColorHex(
+        IReadOnlyDictionary<int, string> data,
+        IReadOnlyDictionary<string, string> layerColorsByName)
+    {
+        if (data.TryGetValue(420, out var trueColorRaw)
+            && int.TryParse(trueColorRaw, out var trueColor))
+        {
+            return ToColorHex(AciColor.FromTrueColor(trueColor));
+        }
+
+        if (data.TryGetValue(62, out var aciRaw)
+            && short.TryParse(aciRaw, out var aci))
+        {
+            var abs = Math.Abs(aci);
+            // 0 = ByBlock, 256 = ByLayer — fall through to layer color.
+            if (abs is >= 1 and <= 255)
+            {
+                return ToColorHex(AciColor.FromCadIndex(abs));
+            }
+        }
+
+        if (data.TryGetValue(8, out var layerName)
+            && !string.IsNullOrWhiteSpace(layerName)
+            && layerColorsByName.TryGetValue(layerName.Trim(), out var layerHex))
+        {
+            return layerHex;
+        }
+
+        if (layerColorsByName.TryGetValue("0", out var layer0Hex))
+        {
+            return layer0Hex;
+        }
+
+        return ToColorHex(AciColor.FromCadIndex(7));
     }
 
     /// <summary>
@@ -854,7 +1334,16 @@ public sealed class DxfImportService
             }
         }
 
-        // Explode nested inserts once more if needed.
+        return ExplodeNestedInserts(result);
+    }
+
+    /// <summary>
+    /// Explodes nested <see cref="Insert"/> entities in place while leaving geometry
+    /// in the coordinate space of the parent block / list (no top-level insert transform).
+    /// </summary>
+    private static List<EntityObject> ExplodeNestedInserts(IEnumerable<EntityObject> entities)
+    {
+        var result = entities.ToList();
         for (var i = 0; i < result.Count; i++)
         {
             if (result[i] is Insert nested)
@@ -912,6 +1401,35 @@ public sealed class DxfImportService
             case Ellipse ellipse:
                 AppendEllipse(ellipse, polylines);
                 break;
+
+            case Spline spline:
+                AppendSpline(spline, polylines);
+                break;
+        }
+    }
+
+    private static void AppendSpline(Spline spline, List<List<Point2>> polylines)
+    {
+        var precision = Math.Max(48, ArcSegments);
+        var poly = spline.ToPolyline2D(precision);
+        var points = poly.Vertexes
+            .Select(v => new Point2(v.Position.X, v.Position.Y))
+            .ToList();
+
+        var closed = poly.IsClosed || spline.IsClosed || spline.IsClosedPeriodic;
+        if (closed && points.Count > 1)
+        {
+            var a = points[0];
+            var b = points[^1];
+            if (Math.Abs(a.X - b.X) > 1e-9 || Math.Abs(a.Y - b.Y) > 1e-9)
+            {
+                points.Add(a);
+            }
+        }
+
+        if (points.Count >= 2)
+        {
+            polylines.Add(points);
         }
     }
 
@@ -969,43 +1487,97 @@ public sealed class DxfImportService
 
     private static void AppendEllipse(Ellipse ellipse, List<List<Point2>> polylines)
     {
-        var start = ellipse.StartAngle;
-        var end = ellipse.EndAngle;
-        var closed = Math.Abs(end - start) < 1e-6 || Math.Abs(Math.Abs(end - start) - 360) < 1e-6;
-        if (closed)
+        // netDxf StartAngle/EndAngle are geometric degrees; PolygonalVertexes
+        // converts to parametric angles correctly. Vertices are center-relative.
+        var precision = Math.Max(24, ArcSegments);
+        var local = ellipse.PolygonalVertexes(precision);
+        if (local.Count < 2)
         {
-            start = 0;
-            end = 360;
+            return;
         }
 
-        var major = ellipse.MajorAxis;
-        var minor = ellipse.MinorAxis;
         var cx = ellipse.Center.X;
         var cy = ellipse.Center.Y;
-        var rotation = ellipse.Rotation * Math.PI / 180.0;
-        var cosR = Math.Cos(rotation);
-        var sinR = Math.Sin(rotation);
-
-        var span = end - start;
-        if (span < 0)
+        var points = new List<Point2>(local.Count + (ellipse.IsFullEllipse ? 1 : 0));
+        foreach (var v in local)
         {
-            span += 360;
+            points.Add(new Point2(v.X + cx, v.Y + cy));
         }
 
-        var steps = Math.Max(24, (int)Math.Ceiling(ArcSegments * span / 360.0));
-        var points = new List<Point2>(steps + 1);
-        for (var i = 0; i <= steps; i++)
+        if (ellipse.IsFullEllipse && points.Count > 1)
         {
-            var t = start + span * i / steps;
-            var rad = t * Math.PI / 180.0;
-            var lx = major * 0.5 * Math.Cos(rad);
-            var ly = minor * 0.5 * Math.Sin(rad);
-            var x = cx + lx * cosR - ly * sinR;
-            var y = cy + lx * sinR + ly * cosR;
-            points.Add(new Point2(x, y));
+            points.Add(points[0]);
         }
 
         polylines.Add(points);
+    }
+
+    /// <summary>
+    /// Tessellates a DXF ELLIPSE (center, major-axis endpoint relative to center,
+    /// minor/major ratio, parametric start/end in radians) into a polyline.
+    /// </summary>
+    private static List<Point2> TessellateEllipseDxf(
+        double cx,
+        double cy,
+        double majorEndX,
+        double majorEndY,
+        double ratio,
+        double startParamRad,
+        double endParamRad)
+    {
+        var majorLen = Math.Sqrt((majorEndX * majorEndX) + (majorEndY * majorEndY));
+        if (majorLen < 1e-12 || ratio <= 0)
+        {
+            return [];
+        }
+
+        var minorLen = majorLen * ratio;
+        var rotation = Math.Atan2(majorEndY, majorEndX);
+        var cosR = Math.Cos(rotation);
+        var sinR = Math.Sin(rotation);
+
+        var start = startParamRad;
+        var end = endParamRad;
+        var full = Math.Abs(end - start) < 1e-9;
+        double span;
+        if (full)
+        {
+            start = 0;
+            span = 2 * Math.PI;
+        }
+        else
+        {
+            span = end - start;
+            // Normalize to a positive sweep of at most one full turn.
+            while (span <= 0)
+            {
+                span += 2 * Math.PI;
+            }
+
+            while (span > 2 * Math.PI + 1e-9)
+            {
+                span -= 2 * Math.PI;
+            }
+        }
+
+        var steps = Math.Max(24, (int)Math.Ceiling(ArcSegments * span / (2 * Math.PI)));
+        var points = new List<Point2>(steps + 1);
+        for (var i = 0; i <= steps; i++)
+        {
+            var t = start + (span * i / steps);
+            var lx = majorLen * Math.Cos(t);
+            var ly = minorLen * Math.Sin(t);
+            var x = cx + (lx * cosR) - (ly * sinR);
+            var y = cy + (lx * sinR) + (ly * cosR);
+            points.Add(new Point2(x, y));
+        }
+
+        if (full && points.Count > 1)
+        {
+            points[^1] = points[0];
+        }
+
+        return points;
     }
 
     private static List<Point2> TessellateArc(
@@ -1081,20 +1653,29 @@ public sealed class DxfImportService
 public sealed class ImportResult
 {
     public bool Success { get; init; }
-    public PlacedPart? Part { get; init; }
+    public IReadOnlyList<PlacedPart> Parts { get; init; } = [];
+    public PlacedPart? Part => Parts.Count > 0 ? Parts[0] : null;
     public string? Error { get; init; }
     public IReadOnlyList<string> Warnings { get; init; } = [];
     public IReadOnlyList<ImportedLayerInfo> Layers { get; init; } = [];
 
+    /// <summary>
+    /// True when parts came from top-level INSERTs and already have world poses
+    /// (do not grid-spread on add).
+    /// </summary>
+    public bool PreserveWorldLayout { get; init; }
+
     public static ImportResult Ok(
-        PlacedPart part,
+        IReadOnlyList<PlacedPart> parts,
         IReadOnlyList<string>? warnings = null,
-        IReadOnlyList<ImportedLayerInfo>? layers = null) => new()
+        IReadOnlyList<ImportedLayerInfo>? layers = null,
+        bool preserveWorldLayout = false) => new()
     {
         Success = true,
-        Part = part,
+        Parts = parts,
         Warnings = warnings ?? [],
         Layers = layers ?? [],
+        PreserveWorldLayout = preserveWorldLayout,
     };
 
     public static ImportResult Fail(string error, IReadOnlyList<string>? warnings = null) => new()
